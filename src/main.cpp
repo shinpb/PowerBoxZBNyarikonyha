@@ -39,6 +39,13 @@ uint8_t button = BOOT_PIN;
 // Forward declarations
 void setup();
 void loop();
+void init_sensors_dht();
+void init_sensors_ina();
+void init_zb_dht();
+void init_zb_dc();
+void zb_network_up();
+void measure_dht();
+void measure_dc();
 
 // ESP-IDF main entry point
 extern "C" void app_main() {
@@ -57,40 +64,45 @@ extern "C" void app_main() {
 
 void setup() {
   Serial.begin(9600);
+  Serial.printf("\n\n\n\n\n");
+
+  Serial.printf("Init DHT sensors\n");
+  init_sensors_dht();
+  
+  Serial.printf("Init INA sensors\n");
+  init_sensors_ina();
+
+  Serial.printf("Init Zigbee DHT endpoints\n");
+  init_zb_dht();
+
+  Serial.printf("Init Zigbee DC endpoints\n");
+  init_zb_dc();
+
+  Serial.printf("Start Zigbee network\n");
+  zb_network_up();
+
+  Serial.printf("Setup done\n");
+}
 
 
+void loop() {
+  // Wait a few seconds between measurements.
+  delay(2000);
+
+  measure_dht();
+  
+  measure_dc();
+}
+
+
+void init_sensors_dht() {
   for (int idx = 0; idx < dht_n; idx++) {
-#ifdef SerialPrint
-    Serial.print("init DHT ");
-    Serial.println(idx);
-#endif
+    Serial.printf("\tInit DHT %d\n", idx);
     dht_arr[idx].begin();
-    ZigbeeTempSensor& zbTempSensor = zbTempSensors[idx];
-
-    // Optional: set Zigbee device name and model
-    zbTempSensor.setManufacturerAndModel("Espressif", "ZigbeeTempSensor");
-
-    // Set minimum and maximum temperature measurement value (10-50°C is default range for chip temperature measurement)
-    zbTempSensor.setMinMaxValue(10, 50);
-
-    // Optional: Set default (initial) value for the temperature sensor to 10.0°C to match the minimum temperature measurement value
-    zbTempSensor.setDefaultValue(10.0);
-
-    // Optional: Set tolerance for temperature measurement in °C (lowest possible value is 0.01°C)
-    zbTempSensor.setTolerance(1);
-
-    // Set power source to battery, battery percentage and battery voltage (now 100% and 3.5V for demonstration)
-    // The value can be also updated by calling zbTempSensor.setBatteryPercentage(percentage) or zbTempSensor.setBatteryVoltage(voltage) anytime after Zigbee.begin()
-    zbTempSensor.setPowerSource(ZB_POWER_SOURCE_BATTERY, 100, 35);
-
-    // Add humidity cluster to the temperature sensor device with min, max, tolerance and default values
-    zbTempSensor.addHumiditySensor(0, 100, 1, 0.0);
-
-    // Add endpoint to Zigbee Core
-    Zigbee.addEndpoint(&zbTempSensor);
   }
+}
 
-
+void init_sensors_ina() {
   for (int idx = 0; idx < ina3221_n; idx++) {
     // ~/.arduino15/packages/esp32/hardware/esp32/3.3.11/variants/esp32c6/pins_arduino.h
     //SDA = 23;
@@ -102,100 +114,106 @@ void setup() {
     uint8_t i2c_addr = 0x40 + (idx % 4);
     Adafruit_INA3221& ina3221 = ina3221_arr[idx];
     if (!ina3221.begin(i2c_addr, I2C_Bus)) {
-#ifdef SerialPrint
-      Serial.print("Failed to find INA3221 chip ");
-      Serial.print(idx);
-      Serial.print(" (Bus ");
-      Serial.print(I2C_Bus->getBusNum());
-      Serial.print(" 0x");
-      Serial.print(i2c_addr,HEX);
-      Serial.println(")");
-#endif
+      Serial.printf("\tFailed to find INA3221 chip %d (Bus %d 0x%X)\n",
+        idx, I2C_Bus->getBusNum(), i2c_addr);
       delay(1000);
       ESP.restart();
     }
-#ifdef SerialPrint
-      Serial.print("Found INA3221 chip ");
-      Serial.print(idx);
-      Serial.print(" (Bus ");
-      Serial.print(I2C_Bus->getBusNum());
-      Serial.print(" 0x");
-      Serial.print(i2c_addr,HEX);
-      Serial.println(")");
-#endif
+      Serial.printf("\tFound INA3221 chip %d (Bus %d 0x%X)\n",
+        idx, I2C_Bus->getBusNum(), i2c_addr);
 
     ina3221.setAveragingMode(INA3221_AVG_16_SAMPLES);
 
-    // Set shunt resistances for all channels to 0.05 ohms
     for (uint8_t channel = 0; channel < 3; channel++) {
       const float r_shunt = ina3221_shunt[idx * 3 + channel];
       ina3221.setShuntResistance(channel, r_shunt);
+    }
+  }
+}
+
+void init_zb_dht() {
+  for (int idx = 0; idx < dht_n; idx++) {
+    ZigbeeTempSensor& zbTempSensor = zbTempSensors[idx];
+    Serial.printf("\tInit DHT %d (EP 0x%X)\n", idx, zbTempSensor.getEndpoint());
+
+    // Optional: set Zigbee device name and model
+    zbTempSensor.setManufacturerAndModel("Espressif", "DHT22");
+
+    // Set minimum and maximum temperature measurement value (10-50°C is default range for chip temperature measurement)
+    zbTempSensor.setMinMaxValue(-40, 80);
+
+    // Optional: Set default (initial) value for the temperature sensor to 10.0°C to match the minimum temperature measurement value
+    //zbTempSensor.setDefaultValue(10.0);
+
+    // Optional: Set tolerance for temperature measurement in °C (lowest possible value is 0.01°C)
+    zbTempSensor.setTolerance(1);
+
+    // Set power source to battery, battery percentage and battery voltage (now 100% and 3.5V for demonstration)
+    // The value can be also updated by calling zbTempSensor.setBatteryPercentage(percentage) or zbTempSensor.setBatteryVoltage(voltage) anytime after Zigbee.begin()
+    zbTempSensor.setPowerSource(ZB_POWER_SOURCE_UNKNOWN);
+
+    // Add humidity cluster to the temperature sensor device with min, max, tolerance and default values
+    zbTempSensor.addHumiditySensor(0, 100, 1, 0.0);
+
+    // Add endpoint to Zigbee Core
+    Zigbee.addEndpoint(&zbTempSensor);
+  }
+}
+
+void init_zb_dc() {
+  for (int idx = 0; idx < ina3221_n; idx++) {
+    for (uint8_t channel = 0; channel < 3; channel++) {
+      const float r_shunt = ina3221_shunt[idx * 3 + channel];
       ZigbeeElectricalMeasurement& zbElectricalMeasurement = zbElectricalMeasurements[idx * 3 + channel];
-      ;
+      Serial.printf("\tInit DC %d (EP 0x%X)\n", idx * 3 + channel, zbElectricalMeasurement.getEndpoint());
       zbElectricalMeasurement.setManufacturerAndModel("Espressif", "ZigbeeElectricalMeasurementDC");
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
-      const int16_t dc_v_max = static_cast<int16_t>(INA3221_MAX_BUS_VOLTAGE_V * 1000.0f); // 26000 mV
+      const int16_t dc_v_max = static_cast<int16_t>(INA3221_MAX_BUS_VOLTAGE_V * 1000.0f);
       const int16_t dc_v_min = 0;
-      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, dc_v_min, dc_v_max);        // 0-5.000V
+      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, dc_v_min, dc_v_max);
       const float   max_i_ma = INA3221_MAX_SHUNT_VOLTAGE_MV / r_shunt;
       const int16_t dc_i_max = static_cast<int16_t>(max_i_ma);
       const int16_t dc_i_min = static_cast<int16_t>(-max_i_ma);
-      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, dc_i_min, dc_i_max);        // 0-1.000A
+      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, dc_i_min, dc_i_max);
       const float   max_p_mw = INA3221_MAX_BUS_VOLTAGE_V * max_i_ma; // V * mA = mW
       const int16_t dc_p_max = static_cast<int16_t>(max_p_mw);
       const int16_t dc_p_min = static_cast<int16_t>(-max_p_mw);
-      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, dc_p_min, dc_p_max);          // 0-5.000W
-      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, 1, 1000);  // 1/1000 = 0.001V (1 unit of measurement = 0.001V = 1mV)
-      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, 1, 1000);  // 1/1000 = 0.001A (1 unit of measurement = 0.001A = 1mA)
-      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, 1, 1000);    // 1/1000 = 0.001W (1 unit of measurement = 0.001W = 1mW)
+      zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, dc_p_min, dc_p_max);
+      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, 1, 1000);
+      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, 1, 1000);
+      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, 1, 1000);
 
       Zigbee.addEndpoint(&zbElectricalMeasurement);
     }
   }
+}
+
+void zb_network_up() {
   if (!Zigbee.begin()) {
+    Serial.println("\tZigbee failed to start!");
     delay(1000);
-#ifdef SerialPrint
-    Serial.println("Zigbee failed to start!");
-    Serial.println("Rebooting...");
-#endif
+    Serial.println("\tRebooting...");
     ESP.restart();
   } else {
-#ifdef SerialPrint
-    Serial.println("Zigbee started successfully!");
-#endif
+    Serial.println("\tZigbee started successfully!");
   }
-#ifdef SerialPrint
-  Serial.println("Connecting to network");
-#endif
+  Serial.println("\tConnecting to network");
   while (!Zigbee.connected()) {
     Serial.print(".");
     delay(100);
   }
-#ifdef SerialPrint
-  Serial.println("Connected");
-#endif
+  Serial.println("\tConnected");
 }
 
-
-
-
-
-
-
-void loop() {
-  // Wait a few seconds between measurements.
-  delay(2000);
-
+void measure_dht() {
   for (int idx = 0; idx < dht_n; idx++) {
     DHT& dht=dht_arr[idx];
     float humidity = dht.readHumidity();
     float temperature = dht.readTemperature();
     if (isnan(humidity) || isnan(temperature)) {
-#ifdef SerialPrint
-      Serial.println("Failed to read from DHT sensor!");
-#endif
+      Serial.printf("Failed to read from DHT %d!", idx);
       continue;
     }
 
@@ -204,15 +222,15 @@ void loop() {
     zbTempSensor.setHumidity(humidity);
     zbTempSensor.reportTemperature();
   }
+}
 
-
+void measure_dc() {
   for (int idx = 0; idx < ina3221_n; idx++) {
     Adafruit_INA3221& ina3221 = ina3221_arr[idx];
     for (uint8_t channel = 0; channel < 3; channel++) {
       float voltageV = ina3221.getBusVoltage(channel);
       float currentA = ina3221.getCurrentAmps(channel);
       ZigbeeElectricalMeasurement& zbElectricalMeasurement = zbElectricalMeasurements[idx * 3 + channel];
-
       zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, voltageV * 1000);
       zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, currentA * 1000);
       zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, voltageV * currentA * 1000);

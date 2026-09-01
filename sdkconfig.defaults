@@ -1,0 +1,14 @@
+# FreeRTOS órajel az Arduino Core-hoz (Kötelező: 1000 Hz)
+CONFIG_FREERTOS_HZ=1000
+
+# Zigbee End Device (ZED) beállítások (24 Endpoint)
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_RADIO_NATIVE=y
+CONFIG_ZB_ZED=y
+CONFIG_ZB_CONFIG_MAX_EP_NUMBER=24
+CONFIG_IEEE802154_ENABLED=y
+
+# Egyéb vezeték nélküli funkciók kikapcsolása
+CONFIG_BT_ENABLED=n
+CONFIG_ESP_WIFI_ENABLED=n
+CONFIG_OPENTHREAD_ENABLED=n

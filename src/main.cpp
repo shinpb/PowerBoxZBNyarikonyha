@@ -4,20 +4,21 @@
 #include "DHT.h"
 #include "Adafruit_INA3221.h"
 
-
 // ******** Global config ********
 
 // ID
 static const char* const Manufacturer = "Espressif";
 static const char* const Model = "PowerBox-INA15-DHT2";
 // ZB
-static const int ZigBeeDisabled = 0;
+static const uint8_t ZigBeeDisabled = 0;
 // Measurement
-static const int MeasurementsToSerial = 1;
 static const int MEASURE_DHT_MS = 3000;
 static const int MEASURE_DC_MS = 1000;
 // Button
 static const uint8_t button = BOOT_PIN;
+// Serial
+static const uint8_t MeasurementsToSerial = 0;
+static const uint8_t ReportsToSerial = 1;
 
 
 
@@ -96,7 +97,7 @@ void dc_measurement_task(void*);
 void button_task(void*);
 
 // ESP-IDF main entry point
-extern "C" void app_main() {
+/*extern "C" void app_main() {
     // 1. Initialize Arduino core peripherals and drivers
     initArduino();
 
@@ -108,11 +109,27 @@ extern "C" void app_main() {
         loop();
         vTaskDelay(1 / portTICK_PERIOD_MS); // Yield to prevent Watchdog Timer (WDT) triggers
     }
-}
+}*/
 
 void setup() {
   Serial.begin(9600);
   Serial.printf("\n\n");
+  
+  Serial.println("=== ZIGBEE MEMORY LIMITS (PRE-COMPILED CORE) ===");
+
+#ifdef CONFIG_ZB_CONFIG_MAX_EP_NUMBER
+    Serial.printf("MAX_EP_NUMBER: %d\n", CONFIG_ZB_CONFIG_MAX_EP_NUMBER);
+#else
+    Serial.println("CONFIG_ZB_CONFIG_MAX_EP_NUMBER: NOT DEFINED in sdkconfig.h (Using build defaults)");
+#endif
+
+#ifdef CONFIG_ZB_CONFIG_BINDING_TABLE_SIZE
+    Serial.printf("BINDING_TABLE_SIZE: %d\n", CONFIG_ZB_CONFIG_BINDING_TABLE_SIZE);
+#else
+    Serial.println("CONFIG_ZB_CONFIG_BINDING_TABLE_SIZE: NOT DEFINED in sdkconfig.h (Using build defaults)");
+#endif
+
+  Serial.println("================================================");
 
   Serial.printf("Init DHT sensors\n");
   init_sensors_dht();
@@ -308,10 +325,15 @@ void dht_measurement_task(void *pvParameters) {
 
                 if ((tempChanged || humChanged || timeToReport) && canReport) {
                     if (!ZigBeeDisabled) {
-                        zbTempSensors[idx].setTemperature(temperature);
-                        zbTempSensors[idx].setHumidity(humidity);
-                        zbTempSensors[idx].reportTemperature();
-                        zbTempSensors[idx].reportHumidity();
+                      zbTempSensors[idx].setTemperature(temperature);
+                      zbTempSensors[idx].setHumidity(humidity);
+                      esp_err_t err_t = zbTempSensors[idx].reportTemperature();
+                      esp_err_t err_h = zbTempSensors[idx].reportHumidity();
+                      if(ReportsToSerial) {
+                        Serial.printf( "Report DHT %d: EP 0x%X: %d, %d\n",
+                          idx, zbTempSensors[idx].getEndpoint(),
+                          err_t, err_h );
+                      }
                     }
                     dhtStates[idx].lastVal1 = temperature;
                     dhtStates[idx].lastVal2 = humidity;
@@ -355,17 +377,19 @@ void dc_measurement_task(void *pvParameters) {
 
                 if ((vChanged || iChanged || timeToReport) && canReport) {
                     if (!ZigBeeDisabled) {
-                        if(MeasurementsToSerial) {
-                          Serial.printf("report\n");
-                        }
                         zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, voltageV * 1000);
                         zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, currentA * 1000);
                         zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, powerW * 100);
                         
-                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
-                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
-                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
-                        vTaskDelay(pdMS_TO_TICKS(30));
+                        esp_err_t err_v = zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
+                        esp_err_t err_c = zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
+                        esp_err_t err_p = zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        if(ReportsToSerial) {
+                          Serial.printf( "Report DC %d/%d: EP 0x%X: %d, %d, %d\n",
+                            idx, channel, zbElectricalMeasurements[flat_idx].getEndpoint(),
+                            err_v, err_c, err_p );
+                        }
                     }
                     inaStates[flat_idx].lastVal1 = voltageV;
                     inaStates[flat_idx].lastVal2 = currentA;
@@ -388,8 +412,9 @@ void button_task(void *pvParameters) {
                 pressStartTime = millis(); 
             } else if ((millis() - pressStartTime) > 3000) {
                 Serial.println("Resetting Zigbee to factory and rebooting in 1s.");
-                vTaskDelay(pdMS_TO_TICKS(1000));
+                vTaskDelay(pdMS_TO_TICKS(500));
                 Zigbee.factoryReset();
+                vTaskDelay(pdMS_TO_TICKS(500));
                 ESP.restart();
             }
         } else {

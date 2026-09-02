@@ -4,17 +4,32 @@
 #include "DHT.h"
 #include "Adafruit_INA3221.h"
 
-#define SerialPrint 1
 
+// ******** Global config ********
+
+// ID
+static const char* const Manufacturer = "Espressif";
+static const char* const Model = "PowerBox-INA15-DHT2";
+// ZB
+static const int ZigBeeDisabled = 0;
+// Measurement
+static const int MeasurementsToSerial = 1;
+static const int MEASURE_DHT_MS = 3000;
+static const int MEASURE_DC_MS = 1000;
+// Button
+static const uint8_t button = BOOT_PIN;
+
+
+
+// ******** Sensor config ********
+
+// DHT
 static const uint8_t dht_n = 2;
 DHT dht_arr[dht_n] = {
     { 20, DHT22 },
     { 19, DHT22 }
 };
-ZigbeeTempSensor zbTempSensors[ dht_n ] =  {
-	{0x30}, {0x31}
-};
-
+//INA
 static const uint8_t ina3221_n = 5;
 Adafruit_INA3221 ina3221_arr[ ina3221_n ];
 static const float ina3221_shunt[ ina3221_n * 3 ] = {
@@ -24,6 +39,16 @@ static const float ina3221_shunt[ ina3221_n * 3 ] = {
 	0.1, 0.1, 0.1,
 	0.1, 0.1, 0.1,
 };
+
+
+
+// ******** ZigBee endpoint config ********
+
+// DHT
+ZigbeeTempSensor zbTempSensors[ dht_n ] =  {
+	{0x01}, {0x02}
+};
+// INA
 constexpr float INA3221_MAX_BUS_VOLTAGE_V = 26.0f;     // Max busz feszültség: 26V
 constexpr float INA3221_MAX_SHUNT_VOLTAGE_MV = 163.84f; // Max sönt feszültség: 163.84mV
 ZigbeeElectricalMeasurement zbElectricalMeasurements[ ina3221_n * 3 ] = {
@@ -34,7 +59,29 @@ ZigbeeElectricalMeasurement zbElectricalMeasurements[ ina3221_n * 3 ] = {
 	{0x20}, {0x21}, {0x22},
 };
 
-uint8_t button = BOOT_PIN;
+
+
+// ******** Reporting config ********
+
+// Global
+const unsigned long MAX_REPORT_INTERVAL = 60000;
+const unsigned long MIN_REPORT_INTERVAL = 5000;
+// DHT
+static const float REPORT_THRESHOLD_DHT_TEMP = 0.5; // °C
+static const float REPORT_THRESHOLD_DHT_HUM = 2.0; // %
+// INA
+static const float REPORT_THRESHOLD_DC_VOLT = 0.05; // V 
+static const float REPORT_THRESHOLD_DC_CUR = 0.01; // A
+//ReportState 
+struct SensorState {
+    float lastVal1 = -1000;
+    float lastVal2 = -1000;
+    unsigned long lastReportTime = 0;
+};
+SensorState dhtStates[dht_n];
+SensorState inaStates[ina3221_n * 3];
+
+
 
 // Forward declarations
 void setup();
@@ -44,8 +91,9 @@ void init_sensors_ina();
 void init_zb_dht();
 void init_zb_dc();
 void zb_network_up();
-void measure_dht();
-void measure_dc();
+void dht_measurement_task(void*);
+void dc_measurement_task(void*);
+void button_task(void*);
 
 // ESP-IDF main entry point
 extern "C" void app_main() {
@@ -64,7 +112,7 @@ extern "C" void app_main() {
 
 void setup() {
   Serial.begin(9600);
-  Serial.printf("\n\n\n\n\n");
+  Serial.printf("\n\n");
 
   Serial.printf("Init DHT sensors\n");
   init_sensors_dht();
@@ -72,28 +120,52 @@ void setup() {
   Serial.printf("Init INA sensors\n");
   init_sensors_ina();
 
-  Serial.printf("Init Zigbee DHT endpoints\n");
-  init_zb_dht();
+  if(!ZigBeeDisabled){
+    pinMode(button, INPUT_PULLUP);
 
-  Serial.printf("Init Zigbee DC endpoints\n");
-  init_zb_dc();
+    Serial.printf("Init Zigbee DHT endpoints\n");
+    init_zb_dht();
 
-  Serial.printf("Start Zigbee network\n");
-  zb_network_up();
+    Serial.printf("Init Zigbee DC endpoints\n");
+    init_zb_dc();
+
+    Serial.printf("Start Zigbee network\n");
+    zb_network_up();
+  }
+  
+  xTaskCreate(
+      dht_measurement_task, 
+      "Task_DHT",     
+      4096,            
+      NULL,            
+      1,
+      NULL             
+  );
+
+  xTaskCreate(
+      dc_measurement_task,  
+      "Task_DC",      
+      4096,            
+      NULL,            
+      1,
+      NULL             
+  );
+
+  xTaskCreate(
+      button_task, 
+      "Task_Button",  
+      2048,
+      NULL, 
+      1,
+      NULL
+  );
 
   Serial.printf("Setup done\n");
 }
 
-
 void loop() {
-  // Wait a few seconds between measurements.
-  delay(2000);
-
-  measure_dht();
-  
-  measure_dc();
+  vTaskDelay(portMAX_DELAY);
 }
-
 
 void init_sensors_dht() {
   for (int idx = 0; idx < dht_n; idx++) {
@@ -136,8 +208,7 @@ void init_zb_dht() {
     ZigbeeTempSensor& zbTempSensor = zbTempSensors[idx];
     Serial.printf("\tInit DHT %d (EP 0x%X)\n", idx, zbTempSensor.getEndpoint());
 
-    // Optional: set Zigbee device name and model
-    zbTempSensor.setManufacturerAndModel("Espressif", "DHT22");
+    zbTempSensor.setManufacturerAndModel(Manufacturer, Model);
 
     // Set minimum and maximum temperature measurement value (10-50°C is default range for chip temperature measurement)
     zbTempSensor.setMinMaxValue(-40, 80);
@@ -146,14 +217,14 @@ void init_zb_dht() {
     //zbTempSensor.setDefaultValue(10.0);
 
     // Optional: Set tolerance for temperature measurement in °C (lowest possible value is 0.01°C)
-    zbTempSensor.setTolerance(1);
+    zbTempSensor.setTolerance(REPORT_THRESHOLD_DHT_TEMP);
 
     // Set power source to battery, battery percentage and battery voltage (now 100% and 3.5V for demonstration)
     // The value can be also updated by calling zbTempSensor.setBatteryPercentage(percentage) or zbTempSensor.setBatteryVoltage(voltage) anytime after Zigbee.begin()
     zbTempSensor.setPowerSource(ZB_POWER_SOURCE_UNKNOWN);
 
     // Add humidity cluster to the temperature sensor device with min, max, tolerance and default values
-    zbTempSensor.addHumiditySensor(0, 100, 1, 0.0);
+    zbTempSensor.addHumiditySensor(0, 100, REPORT_THRESHOLD_DHT_HUM, 0.0);
 
     // Add endpoint to Zigbee Core
     Zigbee.addEndpoint(&zbTempSensor);
@@ -163,10 +234,11 @@ void init_zb_dht() {
 void init_zb_dc() {
   for (int idx = 0; idx < ina3221_n; idx++) {
     for (uint8_t channel = 0; channel < 3; channel++) {
-      const float r_shunt = ina3221_shunt[idx * 3 + channel];
-      ZigbeeElectricalMeasurement& zbElectricalMeasurement = zbElectricalMeasurements[idx * 3 + channel];
-      Serial.printf("\tInit DC %d (EP 0x%X)\n", idx * 3 + channel, zbElectricalMeasurement.getEndpoint());
-      zbElectricalMeasurement.setManufacturerAndModel("Espressif", "ZigbeeElectricalMeasurementDC");
+      uint8_t flat_idx = idx * 3 + channel;
+      const float r_shunt = ina3221_shunt[flat_idx];
+      ZigbeeElectricalMeasurement& zbElectricalMeasurement = zbElectricalMeasurements[flat_idx];
+      zbElectricalMeasurement.setManufacturerAndModel(Manufacturer, Model);
+      Serial.printf("\tInit DC %d (EP 0x%X)\n", flat_idx, zbElectricalMeasurement.getEndpoint());
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
       zbElectricalMeasurement.addDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
@@ -178,12 +250,12 @@ void init_zb_dc() {
       const int16_t dc_i_min = static_cast<int16_t>(-max_i_ma);
       zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, dc_i_min, dc_i_max);
       const float   max_p_mw = INA3221_MAX_BUS_VOLTAGE_V * max_i_ma; // V * mA = mW
-      const int16_t dc_p_max = static_cast<int16_t>(max_p_mw);
-      const int16_t dc_p_min = static_cast<int16_t>(-max_p_mw);
+      const int16_t dc_p_max = static_cast<int16_t>(max_p_mw / 10.0f);
+      const int16_t dc_p_min = static_cast<int16_t>(-max_p_mw / 10.0f);
       zbElectricalMeasurement.setDCMinMaxValue(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, dc_p_min, dc_p_max);
       zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, 1, 1000);
       zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, 1, 1000);
-      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, 1, 1000);
+      zbElectricalMeasurement.setDCMultiplierDivisor(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, 1, 100);
 
       Zigbee.addEndpoint(&zbElectricalMeasurement);
     }
@@ -207,36 +279,123 @@ void zb_network_up() {
   Serial.println("\tConnected");
 }
 
-void measure_dht() {
-  for (int idx = 0; idx < dht_n; idx++) {
-    DHT& dht=dht_arr[idx];
-    float humidity = dht.readHumidity();
-    float temperature = dht.readTemperature();
-    if (isnan(humidity) || isnan(temperature)) {
-      Serial.printf("Failed to read from DHT %d!", idx);
-      continue;
+void dht_measurement_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(MEASURE_DHT_MS);
+
+    unsigned long startMillis = millis();
+    for (int idx = 0; idx < dht_n; idx++) {
+        dhtStates[idx].lastReportTime = startMillis - MAX_REPORT_INTERVAL;
     }
 
-    ZigbeeTempSensor& zbTempSensor = zbTempSensors[idx];
-    zbTempSensor.setTemperature(temperature);
-    zbTempSensor.setHumidity(humidity);
-    zbTempSensor.reportTemperature();
-  }
+    while (true) {
+        unsigned long currentMillis = millis();
+        for (int idx = 0; idx < dht_n; idx++) {
+            float humidity = dht_arr[idx].readHumidity();
+            float temperature = dht_arr[idx].readTemperature();
+            
+            if (!isnan(humidity) && !isnan(temperature)) {
+                bool tempChanged = fabs(temperature - dhtStates[idx].lastVal1) > REPORT_THRESHOLD_DHT_TEMP;
+                bool humChanged = fabs(humidity - dhtStates[idx].lastVal2) > REPORT_THRESHOLD_DHT_HUM;
+                
+                if(MeasurementsToSerial) {
+                  Serial.printf("DHT %d: %.2f°C %.0f%%\n", idx, temperature, humidity);
+                }
+
+                unsigned long elapsed = currentMillis - dhtStates[idx].lastReportTime;
+                bool timeToReport = elapsed >= MAX_REPORT_INTERVAL;
+                bool canReport = elapsed >= MIN_REPORT_INTERVAL;
+
+                if ((tempChanged || humChanged || timeToReport) && canReport) {
+                    if (!ZigBeeDisabled) {
+                        zbTempSensors[idx].setTemperature(temperature);
+                        zbTempSensors[idx].setHumidity(humidity);
+                        zbTempSensors[idx].reportTemperature();
+                        zbTempSensors[idx].reportHumidity();
+                    }
+                    dhtStates[idx].lastVal1 = temperature;
+                    dhtStates[idx].lastVal2 = humidity;
+                    dhtStates[idx].lastReportTime = currentMillis;
+                }
+            }
+        }
+        vTaskDelayUntil(&xLastWakeTime, xFrequency); 
+    }
 }
 
-void measure_dc() {
-  for (int idx = 0; idx < ina3221_n; idx++) {
-    Adafruit_INA3221& ina3221 = ina3221_arr[idx];
-    for (uint8_t channel = 0; channel < 3; channel++) {
-      float voltageV = ina3221.getBusVoltage(channel);
-      float currentA = ina3221.getCurrentAmps(channel);
-      ZigbeeElectricalMeasurement& zbElectricalMeasurement = zbElectricalMeasurements[idx * 3 + channel];
-      zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, voltageV * 1000);
-      zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, currentA * 1000);
-      zbElectricalMeasurement.setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, voltageV * currentA * 1000);
-      zbElectricalMeasurement.reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
-      zbElectricalMeasurement.reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
-      zbElectricalMeasurement.reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
+void dc_measurement_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(MEASURE_DC_MS); // 1 másodperces precíz mérés
+
+    unsigned long startMillis = millis();
+    for (int idx = 0; idx < ina3221_n * 3; idx++) {
+        inaStates[idx].lastReportTime = startMillis - MAX_REPORT_INTERVAL;
     }
-  }
+
+    while (true) {
+        unsigned long currentMillis = millis();
+        for (int idx = 0; idx < ina3221_n; idx++) {
+            for (uint8_t channel = 0; channel < 3; channel++) {
+                int flat_idx = (idx * 3) + channel;
+                
+                float voltageV = ina3221_arr[idx].getBusVoltage(channel);
+                float currentA = ina3221_arr[idx].getCurrentAmps(channel);
+                float powerW = voltageV * currentA;
+               
+                if(MeasurementsToSerial) {
+                  Serial.printf("DC %d/%d: %.4fV %.4fA\n", idx, channel, voltageV, currentA);
+                }
+
+                bool vChanged = fabs(voltageV - inaStates[flat_idx].lastVal1) > REPORT_THRESHOLD_DC_VOLT;
+                bool iChanged = fabs(currentA - inaStates[flat_idx].lastVal2) > REPORT_THRESHOLD_DC_CUR;
+                
+                unsigned long elapsed = currentMillis - inaStates[flat_idx].lastReportTime;
+                bool timeToReport = elapsed >= MAX_REPORT_INTERVAL;
+                bool canReport = elapsed >= MIN_REPORT_INTERVAL;
+
+                if ((vChanged || iChanged || timeToReport) && canReport) {
+                    if (!ZigBeeDisabled) {
+                        if(MeasurementsToSerial) {
+                          Serial.printf("report\n");
+                        }
+                        zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE, voltageV * 1000);
+                        zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT, currentA * 1000);
+                        zbElectricalMeasurements[flat_idx].setDCMeasurement(ZIGBEE_DC_MEASUREMENT_TYPE_POWER, powerW * 100);
+                        
+                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_VOLTAGE);
+                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_CURRENT);
+                        zbElectricalMeasurements[flat_idx].reportDC(ZIGBEE_DC_MEASUREMENT_TYPE_POWER);
+                        vTaskDelay(pdMS_TO_TICKS(30));
+                    }
+                    inaStates[flat_idx].lastVal1 = voltageV;
+                    inaStates[flat_idx].lastVal2 = currentA;
+                    inaStates[flat_idx].lastReportTime = currentMillis;
+                }
+            }
+        }
+        vTaskDelayUntil(&xLastWakeTime, xFrequency); 
+    }
+}
+
+void button_task(void *pvParameters) {
+    unsigned long pressStartTime = 0;
+    bool isPressed = false;
+    
+    while (true) {
+        if (digitalRead(button) == LOW) {
+            if (!isPressed) {
+                isPressed = true;
+                pressStartTime = millis(); 
+            } else if ((millis() - pressStartTime) > 3000) {
+                Serial.println("Resetting Zigbee to factory and rebooting in 1s.");
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                Zigbee.factoryReset();
+                ESP.restart();
+            }
+        } else {
+            isPressed = false;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(50)); 
+    }
 }

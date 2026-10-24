@@ -18,8 +18,6 @@ struct AppConfig {
         // ZCL Strings MUST be length-prefixed.
         const char Manufacturer[11] = "\x09" "Espressif";
         const char Model[21] = "\x13" "PowerBox-INA15-DHT2";
-        //const char* Manufacturer = "Espressif";
-        //const char* Model = "PowerBox-INA15-DHT2";
         uint8_t PowerSource = EZB_ZCL_BASIC_POWER_SOURCE_DC_SOURCE;
         //BOOT_PIN GPIO_NUM_9
         const gpio_num_t ButtonPin = GPIO_NUM_9;
@@ -33,7 +31,7 @@ struct AppConfig {
 
     // Serial & Logging
     struct {
-        const uint8_t EnabledMeasurements = 1;
+        const uint8_t EnabledMeasurements = 0;
         const uint8_t EnabledReports = 1;
         const char* TagSetup = "Setup";
         const char* TagInitSensor = "InitSensor";
@@ -95,8 +93,6 @@ struct AppConfig {
         struct {
             const uint8_t Count = n_INA;
             const uint8_t CountBus0 = 4;
-            const float MaxBusVoltage_V = 26.0f;
-            const float MaxshuntVoltage_mV = 163.84f;
             const float Shunts[n_INA][INA3221_BUS_NUMBER] = {
                 {0.1f, 0.1f, 0.1f},
                 {0.1f, 0.1f, 0.1f},
@@ -121,7 +117,6 @@ struct AppConfig {
 
         struct {
             const uint8_t Endpoints[n_DHT] = { 
-//                0x01,
                 0x02, 
                 0x03
             };

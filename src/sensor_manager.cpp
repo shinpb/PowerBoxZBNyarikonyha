@@ -76,7 +76,9 @@ void init_sensors_ina() {
             Config.I2C.bus[bus_idx].pin.scl
         )
     );
+    // I2C clock from Config (ina3221_init_desc sets 1 MHz; the device is created lazily on first transaction)
     ina3221_arr[idx].i2c_dev.cfg.master.clk_speed = Config.I2C.bus[bus_idx].Speed;
+
     ESP_ERROR_CHECK(
         ina3221_set_options(
             &ina3221_arr[idx],
@@ -262,6 +264,7 @@ void dc_measurement_task(void *pvParameters) {
     }
 }
 
+#ifndef DUMMY_SENSOR_MODE
 static uint16_t ina_rd(ina3221_t *d, uint8_t reg) {
     uint8_t b[2] = {0, 0};
     I2C_DEV_TAKE_MUTEX(&d->i2c_dev);
@@ -283,3 +286,6 @@ void ina_diag() {
         }
     }
 }
+#else
+void ina_diag() {}   // no real INA devices in dummy mode
+#endif

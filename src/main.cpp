@@ -39,7 +39,6 @@ extern "C" void app_main() {
     ina_diag();
     
     if(!Config.Zigbee.Disabled){
-        //pinMode(button, INPUT_PULLUP);
         gpio_config_t btn_conf = {};
         btn_conf.pin_bit_mask = (1ULL << Config.Device.ButtonPin);
         btn_conf.mode = GPIO_MODE_INPUT;
@@ -81,5 +80,3 @@ extern "C" void app_main() {
 
     ESP_LOGI(Config.Logging.TagSetup, "Setup done");
 }
-
-

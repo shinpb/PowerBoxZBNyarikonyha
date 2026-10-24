@@ -11,8 +11,6 @@ extern volatile bool is_zigbee_connected;
 #define ESP_ZIGBEE_PRIMARY_CHANNEL_MASK   (1U << CONFIG_ZB_EXAMPLE_PRIMARY_CHANNEL)
 #define ESP_ZIGBEE_SECONDARY_CHANNEL_MASK CONFIG_ZB_EXAMPLE_SECONDARY_CHANNEL_MASK
 
-#define ESP_ZIGBEE_HA_TEMPERATURE_SENSOR_EP_ID (10)
-
 #define ESP_ZIGBEE_STORAGE_PARTITION_NAME "nvs"
 
 #define ESP_ZIGBEE_ZED_CONFIG()                         \
@@ -50,5 +48,3 @@ extern volatile bool is_zigbee_connected;
         .device_config = ESP_ZIGBEE_ZR_CONFIG(),         \
         .platform_config = ESP_ZIGBEE_PLATFORM_CONFIG(), \
     };
-
-

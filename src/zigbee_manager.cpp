@@ -21,7 +21,6 @@
 static void init_zb_basic_cluster(ezb_af_ep_desc_t cluster_list);
 static void init_zb_ep_dht(ezb_af_device_desc_t dev_desc);
 static void init_zb_ep_dc(ezb_af_device_desc_t dev_desc);
-static void init_zb_config_reporting();
 static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal);
 static void zigbee_mainloop_task(void *pvParameters);
 static void init_zb_storage();
@@ -39,34 +38,14 @@ static int16_t dc_val_i[n_INA][INA3221_BUS_NUMBER] = {0};
 static int16_t dc_val_p[n_INA][INA3221_BUS_NUMBER] = {0};
 
 
-// Voltage limits & multipliers
-// static int16_t  dc_v_min_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static int16_t  dc_v_max_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static uint16_t mult_v_arr[n_INA][INA3221_BUS_NUMBER]   = {0};
+// Divisors: voltage mV -> 1000, current mA -> 1000, power cW -> 100
 static uint16_t div_v_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
 
-// Current limits & multipliers
-// static int16_t  dc_i_min_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static int16_t  dc_i_max_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static uint16_t mult_i_arr[n_INA][INA3221_BUS_NUMBER]   = {0};
 static uint16_t div_i_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
 
-// Power limits & multipliers
-// static int16_t  dc_p_min_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static int16_t  dc_p_max_arr[n_INA][INA3221_BUS_NUMBER] = {0};
-// static uint16_t mult_p_arr[n_INA][INA3221_BUS_NUMBER]   = {0};
 static uint16_t div_p_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
 
 
-// DHT measurement storage
-//static int16_t  dht_val_temp[n_DHT] = { (int16_t)0x8000, (int16_t)0x8000 };
-//static uint16_t dht_val_hum[n_DHT]  = { 0xFFFF, 0xFFFF };
-
-// DHT limits
-//static int16_t dht_t_min_arr[n_DHT] = {0};
-//static int16_t dht_t_max_arr[n_DHT] = {0};
-//static uint16_t dht_h_min_arr[n_DHT] = {0};
-//static uint16_t dht_h_max_arr[n_DHT] = {0};
 
 static ezb_af_ep_desc_t create_ep(uint8_t ep, uint16_t device_id) {
     ezb_af_ep_config_t cfg = {};
@@ -98,33 +77,13 @@ void init_zb_ep_dht(ezb_af_device_desc_t dev_desc) {
         uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
         ESP_LOGI(Config.Logging.TagZigbee, "Create EP: DHT %d (EP 0x%X)", idx, ep);
 
-        // Culster list
-        //ezb_af_ep_desc_t cluster_list = ezb_af_get_ep_desc(ep);
-        //ESP_LOGI(Config.Logging.TagZigbee, "ezb_af_get_ep_desc 0x%X", cluster_list);
+        // Endpoint
         ezb_af_ep_desc_t cluster_list = create_ep(ep, EZB_ZHA_TEMPERATURE_SENSOR_DEVICE_ID);
         if (!cluster_list) { ESP_LOGE(Config.Logging.TagZigbee, "EP 0x%X create failed", ep); continue; }
 
-        // // Append basic cluster to endpoint 0x01
-        // if (ep == 0x01) {
-        //     init_zb_basic_cluster(cluster_list);
-        // }
-        
-//        dht_t_min_arr[idx] = (int16_t)(Config.Sensor.Dht.MinTemp * 100);
-//        dht_t_max_arr[idx] = (int16_t)(Config.Sensor.Dht.MaxTemp * 100);
-//        dht_h_min_arr[idx] = (uint16_t)(Config.Sensor.Dht.MinHum * 100);
-//        dht_h_max_arr[idx] = (uint16_t)(Config.Sensor.Dht.MaxHum * 100);
 
         // Temperature cluster
         add_temp_cluster(cluster_list, Config.Sensor.Dht.MinTemp, Config.Sensor.Dht.MaxTemp);
-//         ezb_zcl_temperature_measurement_cluster_config_t temp_cfg = {
-//             .measured_value = (int16_t)0x8000, // 0x8000 = Érvénytelen/Nincs még mérés (ZCL standard)
-//             .min_measured_value = (int16_t)(Config.Sensor.Dht.MinTemp * 100),
-//             .max_measured_value = (int16_t)(Config.Sensor.Dht.MaxTemp * 100)
-//         };
-//         ezb_zcl_cluster_desc_t temp_cluster = ezb_zcl_temperature_measurement_create_cluster_desc(&temp_cfg, EZB_ZCL_CLUSTER_SERVER);
-// //        ezb_zcl_temperature_measurement_cluster_desc_add_attr(temp_cluster, EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MIN_MEASURED_VALUE_ID, &dht_t_min_arr[idx]);
-// //        ezb_zcl_temperature_measurement_cluster_desc_add_attr(temp_cluster, EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MAX_MEASURED_VALUE_ID, &dht_t_max_arr[idx]);
-//         ezb_af_endpoint_add_cluster_desc(cluster_list, temp_cluster);
 
         // Humidity cluster
         ezb_zcl_rel_humidity_measurement_cluster_config_t hum_cfg = {
@@ -134,12 +93,9 @@ void init_zb_ep_dht(ezb_af_device_desc_t dev_desc) {
         };
         ezb_zcl_cluster_desc_t hum_cluster = ezb_zcl_rel_humidity_measurement_create_cluster_desc(&hum_cfg, EZB_ZCL_CLUSTER_SERVER);
 
-        //ezb_zcl_rel_humidity_measurement_cluster_desc_add_attr(hum_cluster, EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MIN_MEASURED_VALUE_ID, &dht_h_min_arr[idx]);
-        //ezb_zcl_rel_humidity_measurement_cluster_desc_add_attr(hum_cluster, EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MAX_MEASURED_VALUE_ID, &dht_h_max_arr[idx]);
         ezb_af_endpoint_add_cluster_desc(cluster_list, hum_cluster);
 
         ezb_af_device_add_endpoint_desc(dev_desc, cluster_list);
-        //, ep, EZB_AF_HA_PROFILE_ID, EZB_ZHA_TEMPERATURE_SENSOR_DEVICE_ID);
     }
 }
 
@@ -153,16 +109,10 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
             uint8_t ep = Config.Zigbee.Ina.Endpoints[idx][channel];
             ESP_LOGI(Config.Logging.TagZigbee, "Create EP: DC %d/%d (EP 0x%X)", idx, channel, ep);
             
-            // Culster list
-            //ezb_af_ep_desc_t cluster_list = ezb_af_get_ep_desc(ep);
-            //ESP_LOGI(Config.Logging.TagZigbee, "ezb_af_get_ep_desc 0x%X", cluster_list);
+            // Endpoint
             ezb_af_ep_desc_t cluster_list = create_ep(ep, EZB_ZHA_SIMPLE_SENSOR_DEVICE_ID);
             if (!cluster_list) { ESP_LOGE(Config.Logging.TagZigbee, "EP 0x%X create failed", ep); continue; }
 
-            // // Append basic cluster to endpoint 0x01
-            // if(ep == 0x01) {
-            //     init_zb_basic_cluster(cluster_list);
-            // }
 
             // Electrical measurement cluster
             ezb_zcl_electrical_measurement_cluster_config_t em_cfg = {
@@ -170,44 +120,19 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
             };
             ezb_zcl_cluster_desc_t electrical_cluster = ezb_zcl_electrical_measurement_create_cluster_desc(&em_cfg, EZB_ZCL_CLUSTER_SERVER);
 
-            // float r_shunt = Config.Sensor.Ina.Shunts[idx][channel];
-            // float max_i_ma = Config.Sensor.Ina.MaxshuntVoltage_mV / r_shunt;
-            // float max_p_mw = Config.Sensor.Ina.MaxBusVoltage_V * max_i_ma;
-
-            // // Voltage
-            // dc_v_min_arr[idx][channel] = 0;
-            // dc_v_max_arr[idx][channel] = static_cast<int16_t>(Config.Sensor.Ina.MaxBusVoltage_V * 1000.0f);
-            // mult_v_arr[idx][channel]   = 1;
             div_v_arr[idx][channel]    = 1000;
 
-            // // Current
-            // dc_i_min_arr[idx][channel] = static_cast<int16_t>(-max_i_ma);
-            // dc_i_max_arr[idx][channel] = static_cast<int16_t>(max_i_ma);
-            // mult_i_arr[idx][channel]   = 1;
             div_i_arr[idx][channel]    = 1000;
 
-            // // Power
-            // dc_p_min_arr[idx][channel] = static_cast<int16_t>(-max_p_mw / 10.0f);
-            // dc_p_max_arr[idx][channel] = static_cast<int16_t>(max_p_mw / 10.0f);
-            // mult_p_arr[idx][channel]   = 1;
             div_p_arr[idx][channel]    = 100;
 
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, &dc_val_v[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_MIN_VALUE_ID, &dc_v_min_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_MAX_VALUE_ID, &dc_v_max_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_MULTIPLIER_ID, &mult_v_arr[idx][channel]);
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_DIVISOR_ID, &div_v_arr[idx][channel]);
 
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, &dc_val_i[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_MIN_VALUE_ID, &dc_i_min_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_MAX_VALUE_ID, &dc_i_max_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_MULTIPLIER_ID, &mult_i_arr[idx][channel]);
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_DIVISOR_ID, &div_i_arr[idx][channel]);
 
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, &dc_val_p[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_MIN_VALUE_ID, &dc_p_min_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_MAX_VALUE_ID, &dc_p_max_arr[idx][channel]);
-            // ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_MULTIPLIER_ID, &mult_p_arr[idx][channel]);
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_DIVISOR_ID, &div_p_arr[idx][channel]);
 
             ezb_af_endpoint_add_cluster_desc(cluster_list, electrical_cluster);
@@ -272,125 +197,6 @@ static void init_zb_default_reporting()
     }
 }
 
-void init_zb_config_reporting() {
-    // --- DHT SZENZOROK JELENTÉSI SZABÁLYAI ---
-    for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
-        //ZB Endpoint ID
-        uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
-        
-        ezb_zcl_reporting_info_t temp_rep_info = ezb_zcl_reporting_info_find(
-            ep,
-            EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-            EZB_ZCL_CLUSTER_SERVER,
-            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID,
-            0 // manuf_code (0 = EZB_ZCL_NOT_MANUFACTURER_SPECIFIC)
-        );
-
-        if (temp_rep_info != EZB_ZCL_INVALID_REPORTING_INFO) {
-            ezb_zcl_attr_variable_t temp_delta = { .s16 = (int16_t)(Config.Reporting.Dht.ThresholdTemp * 100) };
-            ezb_zcl_reporting_info_update(
-                temp_rep_info,
-                Config.Reporting.Dht.MinInterval,
-                Config.Reporting.Dht.MaxInterval,
-                &temp_delta
-            );
-        } else {
-            ESP_LOGW(Config.Logging.TagZigbee, "Invalid reporting info %s", "temp_rep_info");
-        }
-
-        ezb_zcl_reporting_info_t hum_rep_info = ezb_zcl_reporting_info_find(
-            ep,
-            EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
-            EZB_ZCL_CLUSTER_SERVER,
-            EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID,
-            0 // manuf_code
-        );
-
-        if (hum_rep_info != EZB_ZCL_INVALID_REPORTING_INFO) {
-            ezb_zcl_attr_variable_t hum_delta = { .u16 = (uint16_t)(Config.Reporting.Dht.ThresholdHum * 100) };
-            ezb_zcl_reporting_info_update(
-                hum_rep_info,
-                Config.Reporting.Dht.MinInterval,
-                Config.Reporting.Dht.MaxInterval,
-                &hum_delta
-            );
-        } else {
-            ESP_LOGW(Config.Logging.TagZigbee, "Invalid reporting info %s", "hum_rep_info");
-        }
-    }
-
-    // --- INA3221 SZENZOROK (DC MÉRÉS) JELENTÉSI SZABÁLYAI ---
-    for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) {
-        for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
-            uint8_t ep = Config.Zigbee.Ina.Endpoints[idx][channel];
-
-            ezb_zcl_reporting_info_t v_rep_info = ezb_zcl_reporting_info_find(
-                ep,
-                EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                EZB_ZCL_CLUSTER_SERVER,
-                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID,
-                0 // manuf_code
-            );
-
-            if (v_rep_info != EZB_ZCL_INVALID_REPORTING_INFO) {
-                ezb_zcl_attr_variable_t v_delta = { .s16 = (int16_t)(Config.Reporting.Dc.ThresholdVolt * 1000)};
-
-                ezb_zcl_reporting_info_update(
-                    v_rep_info,
-                    Config.Reporting.Dc.MinInterval,
-                    Config.Reporting.Dc.MaxInterval,
-                    &v_delta
-                );
-            } else {
-                ESP_LOGW(Config.Logging.TagZigbee, "Invalid reporting info %s", "v_rep_info");
-            }
-
-            ezb_zcl_reporting_info_t i_rep_info = ezb_zcl_reporting_info_find(
-                ep,
-                EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                EZB_ZCL_CLUSTER_SERVER,
-                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID,
-                0 // manuf_code
-            );
-
-            if (i_rep_info != EZB_ZCL_INVALID_REPORTING_INFO) {
-                ezb_zcl_attr_variable_t i_delta = { .s16 = (int16_t)(Config.Reporting.Dc.ThresholdCur * 1000)};
-                ezb_zcl_reporting_info_update(
-                    i_rep_info,
-                    Config.Reporting.Dc.MinInterval,
-                    Config.Reporting.Dc.MaxInterval,
-                    &i_delta
-                );
-            } else {
-                ESP_LOGW(Config.Logging.TagZigbee, "Invalid reporting info %s", "i_rep_info");
-            }
-
-            // Teljesítmény (szorzó: 100)
-            ezb_zcl_reporting_info_t p_rep_info = ezb_zcl_reporting_info_find(
-                ep,
-                EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                EZB_ZCL_CLUSTER_SERVER,
-                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID,
-                0 // manuf_code
-            );
-
-            if (p_rep_info != EZB_ZCL_INVALID_REPORTING_INFO) {
-                ezb_zcl_attr_variable_t p_delta = { .s16 = (int16_t)(Config.Reporting.Dc.ThresholdPwr * 100) };
-
-                ezb_zcl_reporting_info_update(
-                    p_rep_info,
-                    Config.Reporting.Dc.MinInterval,
-                    Config.Reporting.Dc.MaxInterval,
-                    &p_delta
-                );
-            } else {
-                ESP_LOGW(Config.Logging.TagZigbee, "Invalid reporting info %s", "p_rep_info");
-            }
-        }
-    }
-}
-
-
 void init_zb_stack() {
 
    init_zb_storage();
@@ -409,8 +215,6 @@ void init_zb_storage() {
     }
     ESP_ERROR_CHECK(err);
 
-//    ESP_LOGI(Config.Logging.TagZigbee, "nvs_flash_init_partition");
-//    ESP_ERROR_CHECK(nvs_flash_init_partition(ESP_ZIGBEE_STORAGE_PARTITION_NAME));
 }
 
 
@@ -456,7 +260,6 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
     case EZB_BDB_SIGNAL_DEVICE_REBOOT: {
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
-//            ESP_LOGI(Config.Logging.TagZigbee, "Deferred driver initialization %s", deferred_driver_init() ? "failed" : "successful");
             ESP_LOGI(Config.Logging.TagZigbee, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
             init_zb_default_reporting();
             if (ezb_bdb_is_factory_new()) {
@@ -511,9 +314,6 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
 esp_err_t esp_zigbee_setup_commissioning(void)
 {
     ezb_aps_secur_enable_distributed_security(false);
-    //ESP_LOGI(Config.Logging.TagZigbee, "ezb_bdb_set_primary_channel_set");
-    //// 2. Set primary channels. 0x07FFF800 represents all channels from 11 to 26
-    //ESP_ERROR_CHECK(ezb_bdb_set_primary_channel_set(0x07FFF800));
     ESP_ERROR_CHECK(ezb_bdb_set_primary_channel_set(ESP_ZIGBEE_PRIMARY_CHANNEL_MASK));
     ESP_ERROR_CHECK(ezb_bdb_set_secondary_channel_set(ESP_ZIGBEE_SECONDARY_CHANNEL_MASK));
     ESP_ERROR_CHECK(ezb_app_signal_add_handler(esp_zigbee_app_signal_handler));
@@ -528,9 +328,7 @@ void zigbee_mainloop_task(void *pvParameters) {
 
     ESP_LOGI(Config.Logging.TagZigbee, "ezb_config_memory");
    ezb_mem_config_t mem_config = {};
-//    mem_config.buffer_pool_size = 200;
     mem_config.aps_bind_table_src_size = 32;
-//    ezb_config_memory(&mem_config);
     auto mr = ezb_config_memory(&mem_config);
     ESP_LOGI(Config.Logging.TagZigbee, "ezb_config_memory ret=%d, heap=%u",
              (int)mr, (unsigned)esp_get_free_heap_size());
@@ -554,7 +352,6 @@ void zigbee_mainloop_task(void *pvParameters) {
                  (unsigned)st0.used_entries, (unsigned)st0.free_entries);
 
     ESP_LOGI(Config.Logging.TagZigbee, "Registering Endpoints");
-//    ezb_af_device_desc_register(dev_desc);
     int64_t t0 = esp_timer_get_time();
     auto rr = ezb_af_device_desc_register(dev_desc);
     ESP_LOGI(Config.Logging.TagZigbee, "register ret=%d, %lld ms, heap=%u",
@@ -569,18 +366,6 @@ void zigbee_mainloop_task(void *pvParameters) {
 
     ezb_zcl_core_action_handler_register(esp_zigbee_zcl_core_action_handler);
 
-    ESP_LOGI(Config.Logging.TagZigbee, "Configuring Zigbee Reporting Rules");
-    // t0 = esp_timer_get_time();
-    // init_zb_config_reporting();
-    // ESP_LOGI(Config.Logging.TagZigbee, "config report, %lld ms, heap=%u",
-    //     (long long)((esp_timer_get_time() - t0) / 1000), (unsigned)esp_get_free_heap_size());
-
-    // st;
-    // if (nvs_get_stats(NULL, &st) == ESP_OK) {
-    //     ESP_LOGI(Config.Logging.TagZigbee, "NVS used=%u free=%u total=%u ns=%u",
-    //             (unsigned)st.used_entries, (unsigned)st.free_entries,
-    //             (unsigned)st.total_entries, (unsigned)st.namespace_count);
-    // }
 
     ESP_LOGI(Config.Logging.TagZigbee, "esp_zigbee_start");
     ESP_ERROR_CHECK(esp_zigbee_start(false));

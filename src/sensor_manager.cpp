@@ -76,6 +76,7 @@ void init_sensors_ina() {
             Config.I2C.bus[bus_idx].pin.scl
         )
     );
+    ina3221_arr[idx].i2c_dev.cfg.master.clk_speed = Config.I2C.bus[bus_idx].Speed;
     ESP_ERROR_CHECK(
         ina3221_set_options(
             &ina3221_arr[idx],

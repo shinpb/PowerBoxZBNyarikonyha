@@ -12,6 +12,7 @@
 
 // Internal components
 #include "zigbee_manager.h"
+#include "sensor_manager.h"
 #include "config.h"
 
 
@@ -261,6 +262,11 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(Config.Logging.TagZigbee, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
+            // Valid attribute values must exist before the stack sends its first reports
+            // (otherwise the invalid initial 0x8000/0xFFFF values go out after every start).
+            measure_all_once();
+            // D7: the registration (long NVS iteration) is over and the stack runs, the measurement tasks may start
+            start_measurement_tasks();
             init_zb_default_reporting();
             if (ezb_bdb_is_factory_new()) {
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
@@ -365,7 +371,6 @@ void zigbee_mainloop_task(void *pvParameters) {
     }
 
     ezb_zcl_core_action_handler_register(esp_zigbee_zcl_core_action_handler);
-
 
     ESP_LOGI(Config.Logging.TagZigbee, "esp_zigbee_start");
     ESP_ERROR_CHECK(esp_zigbee_start(false));

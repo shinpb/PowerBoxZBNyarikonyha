@@ -60,23 +60,12 @@ extern "C" void app_main() {
         );
     }
 
-    xTaskCreate(
-        dht_measurement_task, 
-        "Task_DHT",     
-        4096,            
-        NULL,            
-        1,
-        NULL             
-    );
-
-    xTaskCreate(
-        dc_measurement_task,  
-        "Task_DC",      
-        4096,            
-        NULL,            
-        1,
-        NULL             
-    );
+    // D7: with Zigbee enabled the measurement tasks are started by the Zigbee
+    // main task after the endpoint registration (see zigbee_manager.cpp).
+    // Without Zigbee they only make sense for the serial measurement log.
+    if (Config.Zigbee.Disabled && Config.Logging.EnabledMeasurements) {
+        start_measurement_tasks();
+    }
 
     ESP_LOGI(Config.Logging.TagSetup, "Setup done");
 }

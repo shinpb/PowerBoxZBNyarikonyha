@@ -1,6 +1,8 @@
 //#define DUMMY_SENSOR_MODE 1
 
 // Sys  
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs.h"
 // Drivers
@@ -99,26 +101,33 @@ void init_sensors_ina() {
 #endif
 }
 
-void dht_measurement_task(void *pvParameters) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.DhtMs);
+// ZCL attribute write access.
+// Normal operation (measurement tasks): only after the network join, under the Zigbee lock.
+// pre_start (measure_all_once, called from the stack context): no join needed, no lock needed.
+static inline bool zb_write_allowed(bool pre_start) { return pre_start || is_zigbee_connected; }
+static inline void zb_lock(bool pre_start)   { if (!pre_start) esp_zigbee_lock_acquire(portMAX_DELAY); }
+static inline void zb_unlock(bool pre_start) { if (!pre_start) esp_zigbee_lock_release(); }
 
-    while (true) {
+// Set by measure_all_once(): the tasks then skip their first immediate cycle
+// (the DHT sensor needs >= 2 s between two reads).
+static volatile bool s_pre_measured = false;
+
+static void dht_cycle(bool pre_start) {
         float board_c = 0.0f;
         if (temperature_sensor_get_celsius(board_tsens, &board_c) == ESP_OK) {
             if (Config.Logging.EnabledMeasurements) {
                 ESP_LOGI(Config.Logging.TagMeasurement, "Board: %.2f°C", board_c);
             }
             int16_t measured_board = (int16_t)lroundf(board_c * 100.0f);
-            if (is_zigbee_connected) {
-                esp_zigbee_lock_acquire(portMAX_DELAY);
+            if (zb_write_allowed(pre_start)) {
+                zb_lock(pre_start);
                 ZB_SET(
                     Config.Zigbee.Board.Endpoint,
                     EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
                     EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID,
                     &measured_board
                 );
-                esp_zigbee_lock_release();
+                zb_unlock(pre_start);
             }
         }
         for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
@@ -143,8 +152,8 @@ void dht_measurement_task(void *pvParameters) {
                 uint16_t measured_hum = (uint16_t)(humidity * 100);
                 uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
 
-                if (is_zigbee_connected) {
-                    esp_zigbee_lock_acquire(portMAX_DELAY);
+                if (zb_write_allowed(pre_start)) {
+                    zb_lock(pre_start);
                     ZB_SET(
                         ep, 
                         EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
@@ -157,7 +166,7 @@ void dht_measurement_task(void *pvParameters) {
                         EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID,
                         &measured_hum
                     );
-                    esp_zigbee_lock_release();
+                    zb_unlock(pre_start);
                 }
 #ifndef DUMMY_SENSOR_MODE
             } else {
@@ -167,6 +176,18 @@ void dht_measurement_task(void *pvParameters) {
             }
 #endif
         }
+}
+
+void dht_measurement_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.DhtMs);
+
+    if (s_pre_measured) {
+        vTaskDelay(xFrequency);
+        xLastWakeTime = xTaskGetTickCount();
+    }
+    while (true) {
+        dht_cycle(false);
         static uint32_t n_ = 0;
         if (++n_ % 100 == 0) {   // ~5 percenként
             nvs_stats_t st;
@@ -177,11 +198,7 @@ void dht_measurement_task(void *pvParameters) {
     }
 }
 
-void dc_measurement_task(void *pvParameters) {
-    TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.DcMs); // 1 másodperces precíz mérés
-
-    while (true) {
+static void dc_cycle(bool pre_start) {
         for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) {
             for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
 #ifndef DUMMY_SENSOR_MODE
@@ -220,8 +237,8 @@ void dc_measurement_task(void *pvParameters) {
                     int16_t measured_i = (int16_t)(current_mA);
                     int16_t measured_p = (int16_t)(power_mW / 10.0); //cW because of int16
 
-                    if (is_zigbee_connected) {
-                        esp_zigbee_lock_acquire(portMAX_DELAY);
+                    if (zb_write_allowed(pre_start)) {
+                        zb_lock(pre_start);
                         
                         uint8_t ep_id = Config.Zigbee.Ina.Endpoints[idx][channel];
                         
@@ -249,7 +266,7 @@ void dc_measurement_task(void *pvParameters) {
                             &measured_p
                         );
                         
-                        esp_zigbee_lock_release();
+                        zb_unlock(pre_start);
                     }
 #ifndef DUMMY_SENSOR_MODE
                 } else { // Measurement failed
@@ -260,8 +277,35 @@ void dc_measurement_task(void *pvParameters) {
 #endif
             }
         }
+}
+
+void dc_measurement_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.DcMs); // 1 másodperces precíz mérés
+
+    if (s_pre_measured) {
+        vTaskDelay(xFrequency);
+        xLastWakeTime = xTaskGetTickCount();
+    }
+    while (true) {
+        dc_cycle(false);
         vTaskDelayUntil(&xLastWakeTime, xFrequency); 
     }
+}
+
+void measure_all_once() {
+    dht_cycle(true);
+    dc_cycle(true);
+    s_pre_measured = true;
+}
+
+void start_measurement_tasks() {
+    static bool started = false;
+    if (started) return;
+    started = true;
+    ESP_LOGI(Config.Logging.TagSetup, "Starting measurement tasks");
+    xTaskCreate(dht_measurement_task, "Task_DHT", 4096, NULL, 1, NULL);
+    xTaskCreate(dc_measurement_task,  "Task_DC",  4096, NULL, 1, NULL);
 }
 
 #ifndef DUMMY_SENSOR_MODE

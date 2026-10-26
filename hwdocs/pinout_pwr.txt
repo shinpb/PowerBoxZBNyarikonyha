@@ -1,0 +1,50 @@
+Powerbox:
+ - BusBar Blue: 0V
+ - BusBar Red: 12V
+ - Fuse [0..14]:
+   - IN: 12V
+   - OUT: FUSED12V[0..14]
+ - SW [0..14]:
+   - 0: 0V (VIA Fuse 0.2)
+   - "+": FUSED12V[0..14]
+   - out: SW12V[0..14]
+ - DCDC UC:
+   - GND: 0V
+   - IN: SW12V[0]
+   - OUT: SWUC
+ - DCDC RPI:
+   - GND: 0V
+   - IN: SW12V[1]
+   - OUT: SWRPI
+ - METER (INA3221 port) [0..14]:
+   - "+":
+     - 0: SWUC
+     - 1: SWRPI
+     - [2..14]: SW12V[2..14]
+   - "-":
+     - UC_PLUS
+     - OUT_PLUS[1..14]
+  - OUT_MINUS: 0V
+  - ESP32-C6 Supermini:
+    - "B-": 0V
+    - "B+": UC_PLUS
+
+Periferials:
+ - RPI:
+   - GND: OUT_MINUS[1]
+   - 5V: OUT_PLUS[1]
+ - SWITCH:
+   - GND: OUT_MINUS[2]
+   - 12V: OUT_PLUS[2]
+ - POE Uplink:
+   - "-": OUT_MINUS[3]
+   - "+": OUT_PLUS[3]
+ - KAM [0..1]:
+   - "-": OUT_MINUS[4..5]
+   - "+": OUT_PLUS[4..5]
+ - BTR [0..1]:
+   - "-": OUT_MINUS[12..13]
+   - "+": OUT_PLUS[12..13]
+ - CHARGER:
+   - "-": OUT_MINUS[14]
+   - "+": OUT_PLUS[14]

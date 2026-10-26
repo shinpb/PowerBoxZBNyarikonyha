@@ -1,0 +1,35 @@
+ - ESP36-C6 Supermini:
+   - GND: GND
+   - 3V3: 3V3
+   - 20: DHT1_DATA
+   - 19: DHT2_DATA
+   - 22: I2C_0_SCL
+   - 23: I2C_0_SDA
+   - 7: I2C_1_SCL
+   - 6: I2C_1_SDA
+
+ - INA3221 [0..3]:
+   - VS: 3V3
+   - GND: GND
+   - SCL: I2C_0_SCL
+   - SDA: I2C_0_SDA
+   - A0:
+     - 0x40: GND
+     - 0x41: VS
+     - 0x42: SDA
+     - 0x43: SCL
+
+ - INA3221 [4]:
+   - VS: 3V3
+   - GND: GND
+   - SCL: I2C_1_SCL
+   - SDA: I2C_1_SDA
+   - A0:
+     - 0x40: GND
+     
+ - DHT22 [0..1]:
+   - "-": GND
+   - "+": 3V3
+   - out:
+     - 0: DHT1_DATA
+     - 1: DHT2_DATA

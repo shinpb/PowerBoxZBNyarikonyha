@@ -19,6 +19,10 @@ struct AppConfig {
         const char Manufacturer[11] = "\x09" "Espressif";
         const char Model[21] = "\x13" "PowerBox-INA15-DHT2";
         uint8_t PowerSource = EZB_ZCL_BASIC_POWER_SOURCE_DC_SOURCE;
+        // ZCL Basic version attributes (uint8_t, application-defined, free to choose)
+        uint8_t AppVersion   = 1;   // ApplicationVersion (0x0001)
+        uint8_t StackVersion = 2;   // StackVersion (0x0002)
+        uint8_t HwVersion    = 1;   // HWVersion (0x0003)
         //BOOT_PIN GPIO_NUM_9
         const gpio_num_t ButtonPin = GPIO_NUM_9;
     } Device;

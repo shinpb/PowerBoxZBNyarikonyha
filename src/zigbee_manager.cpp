@@ -3,11 +3,13 @@
 #include "esp_system.h"     // esp_restart()
 #include "esp_timer.h"      // esp_timer_get_time()
 #include "nvs.h"
+#include "esp_app_desc.h" // esp_app_get_description()
 
 // External Libraries
 #include "esp_zigbee.h"
 #include "ezbee/zha.h"
 #include "nvs_flash.h"
+#include <string.h>
 #include "ina3221.h"
 
 // Internal components
@@ -57,16 +59,54 @@ static ezb_af_ep_desc_t create_ep(uint8_t ep, uint16_t device_id) {
     return ezb_af_create_endpoint_desc(&cfg);
 }
 
+// ZCL character string (length-prefixed), max 16 chars for SWBuildID / DateCode.
+// Truncates `src` to 16 chars. `buf` must be static (the stack keeps the pointer).
+static void zcl_str16(uint8_t buf[17], const char *src) {
+    size_t n = strnlen(src, 16);
+    buf[0] = (uint8_t)n;
+    memcpy(buf + 1, src, n);
+}
+
 void init_zb_basic_cluster(ezb_af_ep_desc_t cluster_list) {
     ESP_LOGI(Config.Logging.TagZigbee, "init_zb_basic_cluster");
-    ezb_zcl_cluster_desc_t basic_desc = ezb_zcl_basic_create_cluster_desc(NULL, EZB_ZCL_CLUSTER_SERVER);
+    // ZCLVersion and PowerSource are mandatory attributes: the stack creates them from this config
+    // (add_attr on them is not needed). zcl_version 8 = the library default read by Z2M so far.
+    ezb_zcl_basic_cluster_server_config_t basic_cfg = {};
+    basic_cfg.zcl_version  = 8;
+    basic_cfg.power_source = Config.Device.PowerSource;
+    ezb_zcl_cluster_desc_t basic_desc = ezb_zcl_basic_create_cluster_desc(&basic_cfg, EZB_ZCL_CLUSTER_SERVER);
 
     ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID, (void *)Config.Device.Manufacturer);
     ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID, (void *)Config.Device.Model);
 
-    // MUST be static so the pointer survives the function exit
-    static uint8_t power_source = Config.Device.PowerSource;
-    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_POWER_SOURCE_ID, &power_source);
+    // Optional attribute values MUST be static so the pointers survive the function exit
+
+    // Attribute IDs: EZB_ZCL_ATTR_BASIC_* (ezbee/zcl/cluster/basic_desc.h, verified in 2.0.4).
+    static uint8_t app_version   = Config.Device.AppVersion;
+    static uint8_t stack_version = Config.Device.StackVersion;
+    static uint8_t hw_version    = Config.Device.HwVersion;
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_APPLICATION_VERSION_ID, &app_version);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_STACK_VERSION_ID, &stack_version);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_HW_VERSION_ID, &hw_version);
+
+    // SWBuildID = PROJECT_VER (short git hash, set in root CMakeLists.txt), truncated to 16 chars
+    static uint8_t sw_build_id[17];
+    zcl_str16(sw_build_id, esp_app_get_description()->version);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_SW_BUILD_ID_ID, sw_build_id);
+
+    // DateCode = compile date ("Oct 28 2026", 11 chars)
+    static uint8_t date_code[17];
+    zcl_str16(date_code, __DATE__);
+    ezb_zcl_basic_cluster_desc_add_attr(basic_desc, EZB_ZCL_ATTR_BASIC_DATE_CODE_ID, date_code);
+
+    // One-time info log of the Basic values (identification check against Z2M).
+    // ZCL strings are length-prefixed: byte 0 = length, text starts at byte 1.
+    ESP_LOGI(Config.Logging.TagZigbee, "Basic: mfr=%.*s model=%.*s powerSrc=0x%02X appVer=%u stackVer=%u hwVer=%u swBuildId=%.*s dateCode=%.*s",
+             (int)Config.Device.Manufacturer[0], Config.Device.Manufacturer + 1,
+             (int)Config.Device.Model[0], Config.Device.Model + 1,
+             (unsigned)Config.Device.PowerSource, (unsigned)app_version, (unsigned)stack_version, (unsigned)hw_version,
+             (int)sw_build_id[0], (const char *)sw_build_id + 1,
+             (int)date_code[0], (const char *)date_code + 1);
 
     ezb_af_endpoint_add_cluster_desc(cluster_list, basic_desc);
 }
@@ -177,6 +217,10 @@ static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, u
 
 static void init_zb_default_reporting()
 {
+    // TODO(esp-zigbee-lib >= 2.0.5): the release notes list an API to enable/disable the
+    // Default Response for automatic attribute reports. Once the library is upgraded,
+    // disable it here (per reporting record) to stop the Default Response flood seen in Z2M
+    // (see PLAN.md 4.3). Not available in 2.0.4 - intentionally not built in yet.
     const auto &R = Config.Reporting.Dht;
 
     ezb_zcl_attr_variable_t dt = { .s16 = (int16_t)(R.ThresholdTemp * 100) };

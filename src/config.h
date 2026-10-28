@@ -43,7 +43,21 @@ struct AppConfig {
         const char* TagZigbee = "ZigBee";
         const char* TagMeasurement = "Measurement";
         const char* TagReporting = "Reporting";
+        const char* TagHealth = "Health";
     } Logging;
+
+    // Error indication & fault handling (see health.h)
+    // Pins: GPIO number, a NEGATIVE value (-1, GPIO_NUM_NC) disables that indication (no pin is used).
+    // Pin level: unit state 0 (OK) -> low, anything else -> high. All pins start low.
+    struct {
+        const int GlobalPin = 18;   // high if ANY unit is not OK (GPIO18 free, see pinout)
+        const int ZigbeePin = -1;
+        const int BusPin    = -1;
+        const int SensorPin = -1;
+        const uint8_t  FailThreshold   = 3;    // consecutive failed reads before the error flag is set
+        const uint16_t RetryS          = 30;   // re-init period of a failed INA module (s)
+        const uint8_t  AbortOnInitFail = 0;    // 1 = development: abort on a sensor init failure (old behavior)
+    } Health;
 
     // Zigbee ZCL Reporting Rules
     struct {

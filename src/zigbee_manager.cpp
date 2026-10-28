@@ -15,6 +15,7 @@
 // Internal components
 #include "zigbee_manager.h"
 #include "sensor_manager.h"
+#include "health.h"
 #include "config.h"
 
 
@@ -306,6 +307,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             ESP_LOGI(Config.Logging.TagZigbee, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
+            health_clear(HM_ZIGBEE, HF_ZB_START_FAILED);
             // Valid attribute values must exist before the stack sends its first reports
             // (otherwise the invalid initial 0x8000/0xFFFF values go out after every start).
             measure_all_once();
@@ -313,13 +315,17 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             start_measurement_tasks();
             init_zb_default_reporting();
             if (ezb_bdb_is_factory_new()) {
+                health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);        // set first: no low glitch on the pin
+                health_clear(HM_ZIGBEE, HF_STARTING);
                 ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
             } else {
+                health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED | HF_STARTING);
                 is_zigbee_connected = true;
                 ESP_LOGI(Config.Logging.TagZigbee, "Device reboot");
             }
         } else {
             ESP_LOGW(Config.Logging.TagZigbee, "%s failed with status(0x%02x), please retry", ezb_app_signal_to_string(signal_type), status);
+            health_set(HM_ZIGBEE, HF_ZB_START_FAILED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_INITIALIZATION, 1000);
         }
     } break;
@@ -327,12 +333,14 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             is_zigbee_connected = true;
+            health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             ezb_extpanid_t extended_pan_id;
             ezb_nwk_get_extended_panid(&extended_pan_id);
             ESP_LOGI(Config.Logging.TagZigbee, "Joined network successfully: PAN ID(0x%04hx, EXT: 0x%llx), Channel(%d), Short Address(0x%04hx)",
                      ezb_nwk_get_panid(), extended_pan_id.u64, ezb_nwk_get_current_channel(), ezb_nwk_get_short_address());
         } else {
             ESP_LOGW(Config.Logging.TagZigbee, "Failed to join network with status(0x%02x)", status);
+            health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_NETWORK_STEERING, 1000);
         }
     } break;
@@ -342,6 +350,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
     } break;
     case EZB_ZDO_SIGNAL_LEAVE: {
         is_zigbee_connected = false;
+        health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
         const ezb_zdo_signal_leave_params_t *leave_params = (ezb_zdo_signal_leave_params_t *)ezb_app_signal_get_params(app_signal);
         ESP_LOGI(Config.Logging.TagZigbee, "Left network successfully with type(0x%02x)", leave_params->leave_type);
         alarm_timer_schedule(esp_zigbee_alarm_steer_if_factory_new, 0, 2000);
@@ -406,6 +415,7 @@ void zigbee_mainloop_task(void *pvParameters) {
     auto rr = ezb_af_device_desc_register(dev_desc);
     ESP_LOGI(Config.Logging.TagZigbee, "register ret=%d, %lld ms, heap=%u",
             (int)rr, (long long)((esp_timer_get_time() - t0) / 1000), (unsigned)esp_get_free_heap_size());
+    if ((int)rr != 0) health_set(HM_ZIGBEE, HF_ZB_REG_FAILED);
 
     nvs_stats_t st;
     if (nvs_get_stats(NULL, &st) == ESP_OK) {

@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs.h"
+#include "esp_system.h"   // esp_get_free_heap_size()
 // Drivers
 #include "driver/gpio.h"
 #include "driver/temperature_sensor.h"
@@ -19,6 +20,7 @@
 // Internal components
 #include "sensor_manager.h"
 #include "zigbee_manager.h"
+#include "health.h"
 #include "config.h"
 
 #define ZB_SET(ep, cl, at, val) do {                                              \
@@ -34,16 +36,52 @@ ina3221_t ina3221_arr[n_INA];
 
 static temperature_sensor_handle_t board_tsens = NULL;
 
+// ---- Fault handling state (see health.h) ----
+// Consecutive failed cycles; the error flag is set at Config.Health.FailThreshold.
+static uint8_t s_board_fail = 0;
+#ifndef DUMMY_SENSOR_MODE
+static uint8_t s_dht_fail[n_DHT] = {0};
+static bool    s_i2c_ready = false;
+static bool    s_ina_desc_ok[n_INA] = {false};   // ina3221_init_desc() done (must run only once: it creates a mutex)
+static bool    s_ina_ok[n_INA] = {false};        // INA fully initialized (readable)
+static uint8_t s_ina_fail[n_INA] = {0};
+static TickType_t s_ina_retry_tick[n_INA] = {0};
+#endif
+
+static inline uint8_t sat_inc(uint8_t v) { return v < 255 ? v + 1 : v; }
+
+// Sensor init failures do not abort the firmware (the Zigbee side keeps running);
+// Config.Health.AbortOnInitFail = 1 restores the old abort for development.
+static void init_failed(const char *what, esp_err_t e) {
+    ESP_LOGE(Config.Logging.TagInitSensor, "%s failed: %s", what, esp_err_to_name(e));
+    if (Config.Health.AbortOnInitFail) ESP_ERROR_CHECK(e);
+}
+
 void init_sensor_board() {
     temperature_sensor_config_t cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(
         Config.Sensor.Board.MinTemp, Config.Sensor.Board.MaxTemp);
-    ESP_ERROR_CHECK(temperature_sensor_install(&cfg, &board_tsens));
-    ESP_ERROR_CHECK(temperature_sensor_enable(board_tsens));
+    esp_err_t e = temperature_sensor_install(&cfg, &board_tsens);
+    if (e != ESP_OK) {
+        board_tsens = NULL;
+    } else {
+        e = temperature_sensor_enable(board_tsens);
+    }
+    if (e != ESP_OK) {
+        init_failed("board temperature sensor init", e);
+        s_board_fail = Config.Health.FailThreshold;
+        health_set(HM_SENSOR, HF_SENS_BOARD);
+    }
 }
 
 void init_native_i2c_buses() {
 #ifndef DUMMY_SENSOR_MODE
-    ESP_ERROR_CHECK(i2cdev_init());
+    esp_err_t e = i2cdev_init();
+    if (e == ESP_OK) {
+        s_i2c_ready = true;
+    } else {
+        init_failed("i2cdev_init", e);
+        health_set(HM_BUS, HF_BUS_I2C_INIT);
+    }
 #endif
 }
 
@@ -55,49 +93,90 @@ void init_sensors_dht() {
 #endif
 }
 
-void init_sensors_ina() {
 #ifndef DUMMY_SENSOR_MODE
-  for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) {
-    for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
-        ina3221_arr[idx].shunt[channel] = 
-            (uint16_t)(Config.Sensor.Ina.Shunts[idx][channel] * 1000); // Ohm -> mOhm
-    }
-    uint8_t bus_idx = (idx < Config.Sensor.Ina.CountBus0) ? (0) : (1);
-    uint8_t i2c_addr = 0x40 + (
-        (idx < Config.Sensor.Ina.CountBus0) ? 
-        (idx) : 
-        (idx - Config.Sensor.Ina.CountBus0)
-    );
+static inline uint8_t ina_bus_of(int idx) { return (idx < Config.Sensor.Ina.CountBus0) ? 0 : 1; }
 
-    ESP_ERROR_CHECK(
-        ina3221_init_desc(
+// Initializes (or re-initializes) one INA3221 module. Returns ESP_OK on success.
+static esp_err_t ina_init_one(int idx) {
+    esp_err_t e;
+    if (!s_ina_desc_ok[idx]) {
+        for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
+            ina3221_arr[idx].shunt[channel] =
+                (uint16_t)(Config.Sensor.Ina.Shunts[idx][channel] * 1000); // Ohm -> mOhm
+        }
+        uint8_t bus_idx = ina_bus_of(idx);
+        uint8_t i2c_addr = 0x40 + (
+            (idx < Config.Sensor.Ina.CountBus0) ?
+            (idx) :
+            (idx - Config.Sensor.Ina.CountBus0)
+        );
+        e = ina3221_init_desc(
             &ina3221_arr[idx],
             i2c_addr,
             Config.I2C.bus[bus_idx].port,
             Config.I2C.bus[bus_idx].pin.sda,
             Config.I2C.bus[bus_idx].pin.scl
-        )
+        );
+        if (e != ESP_OK) return e;
+        s_ina_desc_ok[idx] = true;
+        // I2C clock from Config (ina3221_init_desc sets 1 MHz; the device is created lazily on first transaction)
+        ina3221_arr[idx].i2c_dev.cfg.master.clk_speed = Config.I2C.bus[bus_idx].Speed;
+    }
+    e = ina3221_set_options(
+        &ina3221_arr[idx],
+        true,   // continuous mode
+        true,   // bus measurement enabled
+        true    // shunt measurement enabled
     );
-    // I2C clock from Config (ina3221_init_desc sets 1 MHz; the device is created lazily on first transaction)
-    ina3221_arr[idx].i2c_dev.cfg.master.clk_speed = Config.I2C.bus[bus_idx].Speed;
+    if (e != ESP_OK) return e;
+    return ina3221_enable_channel(&ina3221_arr[idx], true, true, true);
+}
 
-    ESP_ERROR_CHECK(
-        ina3221_set_options(
-            &ina3221_arr[idx],
-            true,   // continuous mode
-            true,   // bus measurement enabled
-            true    // shunt measurement enabled
-        )
-    );
-    ESP_ERROR_CHECK(
-        ina3221_enable_channel(
-            &ina3221_arr[idx],
-            true,
-            true,
-            true
-        )
-    );
+// Bus / sensor error flags from the per-module failure counters.
+// If EVERY module on an I2C bus fails, the cause is the bus (typically wiring): the bus flag is set
+// and the module flags of that bus are cleared. Otherwise the failing modules get their own flag.
+static void ina_update_health() {
+    const uint8_t thr = Config.Health.FailThreshold;
+    for (uint8_t b = 0; b < n_I2C; b++) {
+        int members = 0, failed = 0;
+        for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+            if (ina_bus_of(i) != b) continue;
+            members++;
+            if (s_ina_fail[i] >= thr) failed++;
+        }
+        const bool bus_failed = (members > 0) && (failed == members);
+        if (bus_failed) health_set(HM_BUS, HF_BUS_I2C(b)); else health_clear(HM_BUS, HF_BUS_I2C(b));
+        for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+            if (ina_bus_of(i) != b) continue;
+            if (!bus_failed && s_ina_fail[i] >= thr) health_set(HM_SENSOR, HF_SENS_INA(i));
+            else health_clear(HM_SENSOR, HF_SENS_INA(i));
+        }
+    }
+}
+#endif
+
+void init_sensors_ina() {
+#ifndef DUMMY_SENSOR_MODE
+  if (!s_i2c_ready) {
+    ESP_LOGE(Config.Logging.TagInitSensor, "I2C not initialized, INA modules are skipped");
+    for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) s_ina_fail[idx] = Config.Health.FailThreshold;
+    ina_update_health();
+    return;
   }
+  for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) {
+    esp_err_t e = ina_init_one(idx);
+    if (e == ESP_OK) {
+        s_ina_ok[idx] = true;
+        s_ina_fail[idx] = 0;
+    } else {
+        ESP_LOGE(Config.Logging.TagInitSensor, "INA %d init failed: %s (retry every %u s)",
+                 idx, esp_err_to_name(e), (unsigned)Config.Health.RetryS);
+        if (Config.Health.AbortOnInitFail) ESP_ERROR_CHECK(e);
+        s_ina_fail[idx] = Config.Health.FailThreshold;
+        s_ina_retry_tick[idx] = xTaskGetTickCount();
+    }
+  }
+  ina_update_health();
 #endif
 }
 
@@ -114,7 +193,9 @@ static volatile bool s_pre_measured = false;
 
 static void dht_cycle(bool pre_start) {
         float board_c = 0.0f;
-        if (temperature_sensor_get_celsius(board_tsens, &board_c) == ESP_OK) {
+        if (board_tsens != NULL && temperature_sensor_get_celsius(board_tsens, &board_c) == ESP_OK) {
+            if (s_board_fail >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_BOARD);
+            s_board_fail = 0;
             if (Config.Logging.EnabledMeasurements) {
                 ESP_LOGI(Config.Logging.TagMeasurement, "Board: %.2f°C", board_c);
             }
@@ -129,6 +210,9 @@ static void dht_cycle(bool pre_start) {
                 );
                 zb_unlock(pre_start);
             }
+        } else if (board_tsens != NULL) {   // read error (a NULL handle = init failure, already flagged)
+            s_board_fail = sat_inc(s_board_fail);
+            if (s_board_fail >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_BOARD);
         }
         for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
 #ifndef DUMMY_SENSOR_MODE
@@ -138,6 +222,12 @@ static void dht_cycle(bool pre_start) {
             esp_err_t dht_err = dht_read_float_data(Config.Sensor.Dht.Type, Config.Sensor.Dht.Pins[idx], &humidity, &temperature);
             if (dht_err == ESP_OK) {
                 dht_ok[idx]++;
+                if (s_dht_fail[idx] > 0) {
+                    ESP_LOGI(Config.Logging.TagMeasurement, "DHT %d recovered after %u failed reads",
+                             idx, (unsigned)s_dht_fail[idx]);
+                }
+                if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_DHT(idx));
+                s_dht_fail[idx] = 0;
 #else
             static float tick_dht = 0.0;
             tick_dht += 0.1;
@@ -171,6 +261,8 @@ static void dht_cycle(bool pre_start) {
 #ifndef DUMMY_SENSOR_MODE
             } else {
                 dht_fail[idx]++;
+                s_dht_fail[idx] = sat_inc(s_dht_fail[idx]);
+                if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_DHT(idx));
                 ESP_LOGW(Config.Logging.TagMeasurement, "DHT %d read failed: %s (ok=%u fail=%u)",
                          idx, esp_err_to_name(dht_err), (unsigned)dht_ok[idx], (unsigned)dht_fail[idx]);
             }
@@ -192,7 +284,8 @@ void dht_measurement_task(void *pvParameters) {
         if (++n_ % 100 == 0) {   // ~5 percenként
             nvs_stats_t st;
             if (nvs_get_stats(NULL, &st) == ESP_OK)
-                ESP_LOGI(Config.Logging.TagZigbee, "NVS used=%u free=%u", (unsigned)st.used_entries, (unsigned)st.free_entries);
+                ESP_LOGI(Config.Logging.TagZigbee, "NVS used=%u free=%u heap=%u min=%u", (unsigned)st.used_entries, (unsigned)st.free_entries,
+                         (unsigned)esp_get_free_heap_size(), (unsigned)esp_get_minimum_free_heap_size());
         }
         vTaskDelayUntil(&xLastWakeTime, xFrequency); 
     }
@@ -200,6 +293,20 @@ void dht_measurement_task(void *pvParameters) {
 
 static void dc_cycle(bool pre_start) {
         for (int idx = 0; idx < Config.Sensor.Ina.Count; idx++) {
+#ifndef DUMMY_SENSOR_MODE
+            if (!s_ina_ok[idx]) {
+                // Not initialized: retry periodically (not from the stack context of measure_all_once)
+                if (!pre_start && s_i2c_ready &&
+                    (xTaskGetTickCount() - s_ina_retry_tick[idx]) >= pdMS_TO_TICKS(Config.Health.RetryS * 1000UL)) {
+                    s_ina_retry_tick[idx] = xTaskGetTickCount();
+                    esp_err_t e = ina_init_one(idx);
+                    ESP_LOGI(Config.Logging.TagInitSensor, "INA %d re-init: %s", idx, esp_err_to_name(e));
+                    if (e == ESP_OK) { s_ina_ok[idx] = true; s_ina_fail[idx] = 0; }
+                }
+                if (!s_ina_ok[idx]) continue;
+            }
+            bool ina_failed = false;
+#endif
             for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
 #ifndef DUMMY_SENSOR_MODE
                 float voltage_V = 0.0;
@@ -211,12 +318,16 @@ static void dc_cycle(bool pre_start) {
                 
                 float shuntVoltage_mV = 0.0f;
                 float current_mA = 0.0; 
-                auto err_i = ina3221_get_shunt_value(
-                    &ina3221_arr[idx],
-                    (ina3221_channel_t)channel,
-                    &shuntVoltage_mV,
-                    &current_mA
-                );
+                // A failed access can take ~1-2 s (i2cdev retries): no second access after a failed one
+                esp_err_t err_i = ESP_FAIL;
+                if (err_v == ESP_OK) {
+                    err_i = ina3221_get_shunt_value(
+                        &ina3221_arr[idx],
+                        (ina3221_channel_t)channel,
+                        &shuntVoltage_mV,
+                        &current_mA
+                    );
+                }
                 
                 if ((err_v == ESP_OK) && (err_i == ESP_OK)) { // measurement success
 #else
@@ -269,14 +380,33 @@ static void dc_cycle(bool pre_start) {
                         zb_unlock(pre_start);
                     }
 #ifndef DUMMY_SENSOR_MODE
-                } else { // Measurement failed
-                    ESP_LOGW(Config.Logging.TagMeasurement, "Measure DC %d/%d failed: %d, %d",
-                      idx, channel,
-                      err_v, err_i );
+                } else { // Measurement failed (the attribute keeps its last value)
+                    ina_failed = true;
+                    // log the first failure of a streak and then every 60th cycle only
+                    if (s_ina_fail[idx] == 0 || (s_ina_fail[idx] % 60) == 0) {
+                        ESP_LOGW(Config.Logging.TagMeasurement, "Measure DC %d/%d failed: %d, %d",
+                          idx, channel,
+                          err_v, err_i );
+                    }
+                    break;   // skip the remaining channels of a failing module (each failed access may time out)
                 }
 #endif
             }
+#ifndef DUMMY_SENSOR_MODE
+            s_ina_fail[idx] = ina_failed ? sat_inc(s_ina_fail[idx]) : 0;
+            if (s_ina_fail[idx] >= Config.Health.FailThreshold) {
+                // Offline: stop polling (every failed access costs ~1-2 s and slows every other module),
+                // probe it again with a re-init every Config.Health.RetryS seconds.
+                s_ina_ok[idx] = false;
+                s_ina_retry_tick[idx] = xTaskGetTickCount();
+                ESP_LOGW(Config.Logging.TagMeasurement, "INA %d offline, re-init every %u s",
+                         idx, (unsigned)Config.Health.RetryS);
+            }
+#endif
         }
+#ifndef DUMMY_SENSOR_MODE
+        ina_update_health();
+#endif
 }
 
 void dc_measurement_task(void *pvParameters) {
@@ -320,6 +450,8 @@ static uint16_t ina_rd(ina3221_t *d, uint8_t reg) {
 
 void ina_diag() {
     for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+        // A module that failed its init would block here for seconds (I2C retries) and delay the Zigbee start
+        if (!s_ina_ok[i]) { ESP_LOGW("INADiag", "INA%d: not initialized, skipped", i); continue; }
         ina3221_t *d = &ina3221_arr[i];
         ESP_LOGI("INADiag", "INA%d mfr=0x%04X (vart 0x5449) die=0x%04X (vart 0x3220) cfg=0x%04X",
                  i, ina_rd(d, 0xFE), ina_rd(d, 0xFF), ina_rd(d, 0x00));

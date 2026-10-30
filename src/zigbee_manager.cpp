@@ -16,6 +16,7 @@
 #include "zigbee_manager.h"
 #include "sensor_manager.h"
 #include "health.h"
+#include "heartbeat.h"
 #include "config.h"
 
 
@@ -269,7 +270,15 @@ static void esp_zigbee_zcl_core_action_handler(ezb_zcl_core_action_callback_id_t
     switch (callback_id) {
     case EZB_ZCL_CORE_DEFAULT_RSP_CB_ID: {
         ezb_zcl_cmd_default_rsp_message_t *default_rsp = (ezb_zcl_cmd_default_rsp_message_t *)message;
-        ESP_LOGI(Config.Logging.TagZigbee, "Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
+        // Counted (heartbeat "zb:" line) instead of logged: this was ~56% of the serial log.
+        // Only a non-zero status is worth a log line; successful ones are visible at debug level.
+        diag_inc(g_diag.zb_default_rsp);
+        if (default_rsp->in.status_code != 0) {
+            diag_inc(g_diag.zb_default_rsp_err);
+            ESP_LOGW(Config.Logging.TagZigbee, "Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
+        } else {
+            ESP_LOGD(Config.Logging.TagZigbee, "Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
+        }
     } break;
     default:
         ESP_LOGW(Config.Logging.TagZigbee, "ZCL Core Action: ID(0x%04lx)", callback_id);
@@ -325,6 +334,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             }
         } else {
             ESP_LOGW(Config.Logging.TagZigbee, "%s failed with status(0x%02x), please retry", ezb_app_signal_to_string(signal_type), status);
+            diag_inc(g_diag.zb_start_fail);
             health_set(HM_ZIGBEE, HF_ZB_START_FAILED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_INITIALIZATION, 1000);
         }
@@ -333,6 +343,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
             is_zigbee_connected = true;
+            diag_inc(g_diag.zb_join_ok);
             health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             ezb_extpanid_t extended_pan_id;
             ezb_nwk_get_extended_panid(&extended_pan_id);
@@ -340,6 +351,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
                      ezb_nwk_get_panid(), extended_pan_id.u64, ezb_nwk_get_current_channel(), ezb_nwk_get_short_address());
         } else {
             ESP_LOGW(Config.Logging.TagZigbee, "Failed to join network with status(0x%02x)", status);
+            diag_inc(g_diag.zb_join_fail);
             health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_NETWORK_STEERING, 1000);
         }
@@ -350,6 +362,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
     } break;
     case EZB_ZDO_SIGNAL_LEAVE: {
         is_zigbee_connected = false;
+        diag_inc(g_diag.zb_leave);
         health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
         const ezb_zdo_signal_leave_params_t *leave_params = (ezb_zdo_signal_leave_params_t *)ezb_app_signal_get_params(app_signal);
         ESP_LOGI(Config.Logging.TagZigbee, "Left network successfully with type(0x%02x)", leave_params->leave_type);

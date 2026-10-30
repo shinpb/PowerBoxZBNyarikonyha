@@ -10,6 +10,7 @@
 const AppConfig Config;
 // Internal components
 #include "health.h"
+#include "heartbeat.h"
 #include "sensor_manager.h"
 #include "zigbee_manager.h"
 
@@ -42,6 +43,7 @@ extern "C" void app_main() {
         esp_reset_reason_t rr = esp_reset_reason();
         ESP_LOGI(Config.Logging.TagSetup, "Reset reason: %d (%s)", (int)rr, reset_reason_name(rr));
     }
+    heartbeat_start();   // independent status line (heap, health, stacks...), covers the whole boot incl. Zigbee registration
 
     uint32_t flash_size = 0;
     esp_flash_get_physical_size(NULL, &flash_size);

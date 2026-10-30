@@ -44,6 +44,7 @@ struct AppConfig {
         const char* TagMeasurement = "Measurement";
         const char* TagReporting = "Reporting";
         const char* TagHealth = "Health";
+        const char* TagHeartbeat = "Heartbeat";
     } Logging;
 
     // Error indication & fault handling (see health.h)
@@ -57,6 +58,8 @@ struct AppConfig {
         const uint8_t  FailThreshold   = 3;    // consecutive failed reads before the error flag is set
         const uint16_t RetryS          = 30;   // re-init period of a failed INA module (s)
         const uint8_t  AbortOnInitFail = 0;    // 1 = development: abort on a sensor init failure (old behavior)
+        const uint16_t HeartbeatS      = 30;   // heartbeat log period (s), 0 = off (see heartbeat.h)
+        const uint8_t  HeartbeatLongEvery = 5; // every N-th heartbeat also prints the extended diagnostic lines, 0 = never
     } Health;
 
     // Zigbee ZCL Reporting Rules

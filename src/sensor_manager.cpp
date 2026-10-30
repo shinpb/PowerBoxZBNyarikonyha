@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "esp_system.h"   // esp_get_free_heap_size()
+#include "esp_timer.h"    // esp_timer_get_time()
 // Drivers
 #include "driver/gpio.h"
 #include "driver/temperature_sensor.h"
@@ -21,6 +22,7 @@
 #include "sensor_manager.h"
 #include "zigbee_manager.h"
 #include "health.h"
+#include "heartbeat.h"
 #include "config.h"
 
 #define ZB_SET(ep, cl, at, val) do {                                              \
@@ -49,6 +51,15 @@ static TickType_t s_ina_retry_tick[n_INA] = {0};
 #endif
 
 static inline uint8_t sat_inc(uint8_t v) { return v < 255 ? v + 1 : v; }
+
+// Cycle duration statistics for the heartbeat (see heartbeat.h). over: optional overrun counter.
+static void cycle_stat(volatile uint32_t &last, volatile uint32_t &max, volatile uint32_t *over,
+                       int64_t t0_us, int period_ms) {
+    uint32_t ms = (uint32_t)((esp_timer_get_time() - t0_us) / 1000);
+    last = ms;
+    if (ms > max) max = ms;
+    if (over != NULL && ms > (uint32_t)period_ms) diag_inc(*over);
+}
 
 // Sensor init failures do not abort the firmware (the Zigbee side keeps running);
 // Config.Health.AbortOnInitFail = 1 restores the old abort for development.
@@ -196,6 +207,7 @@ static void dht_cycle(bool pre_start) {
         if (board_tsens != NULL && temperature_sensor_get_celsius(board_tsens, &board_c) == ESP_OK) {
             if (s_board_fail >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_BOARD);
             s_board_fail = 0;
+            diag_mark(g_diag.board_last_ok_s);
             if (Config.Logging.EnabledMeasurements) {
                 ESP_LOGI(Config.Logging.TagMeasurement, "Board: %.2f°C", board_c);
             }
@@ -212,16 +224,17 @@ static void dht_cycle(bool pre_start) {
             }
         } else if (board_tsens != NULL) {   // read error (a NULL handle = init failure, already flagged)
             s_board_fail = sat_inc(s_board_fail);
+            diag_inc(g_diag.board_fail);
             if (s_board_fail >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_BOARD);
         }
         for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
 #ifndef DUMMY_SENSOR_MODE
             float temperature = 0.0;
             float humidity = 0.0;
-            static uint32_t dht_ok[n_DHT] = {0}, dht_fail[n_DHT] = {0};
             esp_err_t dht_err = dht_read_float_data(Config.Sensor.Dht.Type, Config.Sensor.Dht.Pins[idx], &humidity, &temperature);
             if (dht_err == ESP_OK) {
-                dht_ok[idx]++;
+                diag_inc(g_diag.dht_ok[idx]);
+                diag_mark(g_diag.dht_last_ok_s[idx]);
                 if (s_dht_fail[idx] > 0) {
                     ESP_LOGI(Config.Logging.TagMeasurement, "DHT %d recovered after %u failed reads",
                              idx, (unsigned)s_dht_fail[idx]);
@@ -260,11 +273,11 @@ static void dht_cycle(bool pre_start) {
                 }
 #ifndef DUMMY_SENSOR_MODE
             } else {
-                dht_fail[idx]++;
+                diag_inc(g_diag.dht_fail[idx]);
                 s_dht_fail[idx] = sat_inc(s_dht_fail[idx]);
                 if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_DHT(idx));
                 ESP_LOGW(Config.Logging.TagMeasurement, "DHT %d read failed: %s (ok=%u fail=%u)",
-                         idx, esp_err_to_name(dht_err), (unsigned)dht_ok[idx], (unsigned)dht_fail[idx]);
+                         idx, esp_err_to_name(dht_err), (unsigned)g_diag.dht_ok[idx], (unsigned)g_diag.dht_fail[idx]);
             }
 #endif
         }
@@ -279,15 +292,11 @@ void dht_measurement_task(void *pvParameters) {
         xLastWakeTime = xTaskGetTickCount();
     }
     while (true) {
+        int64_t t0 = esp_timer_get_time();
         dht_cycle(false);
-        static uint32_t n_ = 0;
-        if (++n_ % 100 == 0) {   // ~5 percenként
-            nvs_stats_t st;
-            if (nvs_get_stats(NULL, &st) == ESP_OK)
-                ESP_LOGI(Config.Logging.TagZigbee, "NVS used=%u free=%u heap=%u min=%u", (unsigned)st.used_entries, (unsigned)st.free_entries,
-                         (unsigned)esp_get_free_heap_size(), (unsigned)esp_get_minimum_free_heap_size());
-        }
-        vTaskDelayUntil(&xLastWakeTime, xFrequency); 
+        cycle_stat(g_diag.dht_cycle_last_ms, g_diag.dht_cycle_max_ms, NULL, t0, Config.Measurement.DhtMs);
+        // (the periodic heap/NVS status moved to the independent heartbeat task, see heartbeat.cpp)
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 
@@ -299,9 +308,10 @@ static void dc_cycle(bool pre_start) {
                 if (!pre_start && s_i2c_ready &&
                     (xTaskGetTickCount() - s_ina_retry_tick[idx]) >= pdMS_TO_TICKS(Config.Health.RetryS * 1000UL)) {
                     s_ina_retry_tick[idx] = xTaskGetTickCount();
+                    diag_inc(g_diag.ina_reinit_try);
                     esp_err_t e = ina_init_one(idx);
                     ESP_LOGI(Config.Logging.TagInitSensor, "INA %d re-init: %s", idx, esp_err_to_name(e));
-                    if (e == ESP_OK) { s_ina_ok[idx] = true; s_ina_fail[idx] = 0; }
+                    if (e == ESP_OK) { s_ina_ok[idx] = true; s_ina_fail[idx] = 0; diag_inc(g_diag.ina_reinit_ok); }
                 }
                 if (!s_ina_ok[idx]) continue;
             }
@@ -394,11 +404,13 @@ static void dc_cycle(bool pre_start) {
             }
 #ifndef DUMMY_SENSOR_MODE
             s_ina_fail[idx] = ina_failed ? sat_inc(s_ina_fail[idx]) : 0;
+            if (!ina_failed) diag_mark(g_diag.ina_last_ok_s[idx]);
             if (s_ina_fail[idx] >= Config.Health.FailThreshold) {
                 // Offline: stop polling (every failed access costs ~1-2 s and slows every other module),
                 // probe it again with a re-init every Config.Health.RetryS seconds.
                 s_ina_ok[idx] = false;
                 s_ina_retry_tick[idx] = xTaskGetTickCount();
+                diag_inc(g_diag.ina_offline[idx]);
                 ESP_LOGW(Config.Logging.TagMeasurement, "INA %d offline, re-init every %u s",
                          idx, (unsigned)Config.Health.RetryS);
             }
@@ -418,8 +430,10 @@ void dc_measurement_task(void *pvParameters) {
         xLastWakeTime = xTaskGetTickCount();
     }
     while (true) {
+        int64_t t0 = esp_timer_get_time();
         dc_cycle(false);
-        vTaskDelayUntil(&xLastWakeTime, xFrequency); 
+        cycle_stat(g_diag.dc_cycle_last_ms, g_diag.dc_cycle_max_ms, &g_diag.dc_overruns, t0, Config.Measurement.DcMs);
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
 

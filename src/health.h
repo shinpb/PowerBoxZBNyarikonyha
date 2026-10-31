@@ -37,3 +37,7 @@ void health_clear(health_module_t m, uint32_t flags);
 uint32_t health_get(health_module_t m);
 // Global state: OR of all modules (0 = everything OK).
 uint32_t health_get_global();
+// Fault mask reported to Zigbee (4.8): sensor faults in bits 0..15 (HF_SENS_*), bus faults in bits 16..23
+// (HF_BUS_* << 16). HF_STARTING and the Zigbee module itself are not included (a device that is not
+// joined cannot report). 0 = no fault.
+uint32_t health_zb_mask();

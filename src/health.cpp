@@ -106,6 +106,14 @@ uint32_t health_get(health_module_t m) {
     return v;
 }
 
+uint32_t health_zb_mask() {
+    portENTER_CRITICAL(&s_lock);
+    uint32_t sensor = s_state[HM_SENSOR] & ~HF_STARTING;
+    uint32_t bus    = s_state[HM_BUS] & ~HF_STARTING;
+    portEXIT_CRITICAL(&s_lock);
+    return (sensor & 0xFFFFu) | ((bus & 0xFFu) << 16);
+}
+
 uint32_t health_get_global() {
     portENTER_CRITICAL(&s_lock);
     uint32_t g = global_locked();

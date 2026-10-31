@@ -8,6 +8,8 @@
 // External Libraries
 #include "esp_zigbee.h"
 #include "ezbee/zha.h"
+#include "ezbee/zcl/cluster/binary_input.h"
+#include "ezbee/zcl/cluster/custom.h"
 #include "nvs_flash.h"
 #include <string.h>
 #include "ina3221.h"
@@ -31,6 +33,7 @@ static void zigbee_mainloop_task(void *pvParameters);
 static void init_zb_storage();
 static void init_zb_ep_board(ezb_af_device_desc_t dev_desc);
 static void add_temp_cluster(ezb_af_ep_desc_t ep_desc, float min_c, float max_c);
+static void add_diag_clusters(ezb_af_ep_desc_t ep_desc);
 static uint64_t millis();
 
 // Shared variable single instance
@@ -38,6 +41,11 @@ volatile bool is_zigbee_connected = false;
 
 
 // values
+// Diagnostic attributes (4.8): backing storage, written through ezb_zcl_set_attr_value()
+static bool     diag_present_value = false;
+static uint8_t  diag_status_flags  = 0;
+static uint32_t diag_fault_mask    = 0;
+
 static int16_t dc_val_v[n_INA][INA3221_BUS_NUMBER] = {0};
 static int16_t dc_val_i[n_INA][INA3221_BUS_NUMBER] = {0};
 static int16_t dc_val_p[n_INA][INA3221_BUS_NUMBER] = {0};
@@ -207,7 +215,35 @@ void init_zb_ep_board(ezb_af_device_desc_t dev_desc) {
 
     init_zb_basic_cluster(cluster_list);
     add_temp_cluster(cluster_list, Config.Sensor.Board.MinTemp, Config.Sensor.Board.MaxTemp);
+    add_diag_clusters(cluster_list);
     ezb_af_device_add_endpoint_desc(dev_desc, cluster_list);
+}
+
+static void diag_cluster_noop(uint8_t) {}
+
+// Device fault indication for the coordinator (4.8)
+static void add_diag_clusters(ezb_af_ep_desc_t ep_desc) {
+    // Standard Binary Input: PresentValue = any fault active
+    ezb_zcl_binary_input_cluster_server_config_t bi_cfg = {
+        .out_of_service = false,
+        .present_value  = false,
+        .status_flags   = 0,
+    };
+    ezb_zcl_cluster_desc_t bi = ezb_zcl_binary_input_create_cluster_desc(&bi_cfg, EZB_ZCL_CLUSTER_SERVER);
+    ezb_af_endpoint_add_cluster_desc(ep_desc, bi);
+
+    // Manufacturer-specific cluster with the fault mask
+    ezb_zcl_custom_cluster_config_t cc_cfg = {
+        .cluster_id  = ZB_DIAG_CLUSTER_ID,
+        .init_func   = diag_cluster_noop,
+        .deinit_func = diag_cluster_noop,
+    };
+    ezb_zcl_cluster_desc_t cc = ezb_zcl_custom_create_cluster_desc(&cc_cfg, EZB_ZCL_CLUSTER_SERVER);
+    ezb_err_t r = ezb_zcl_custom_cluster_desc_add_attr(cc, ZB_DIAG_ATTR_FAULT_MASK, EZB_ZCL_ATTR_TYPE_MAP32,
+                                                       EZB_ZCL_ATTR_ACCESS_READ_ONLY | EZB_ZCL_ATTR_ACCESS_REPORTING,
+                                                       &diag_fault_mask);
+    if (r != EZB_ERR_NONE) ESP_LOGW(Config.Logging.TagZigbee, "diag cluster add_attr ret=%d", (int)r);
+    ezb_af_endpoint_add_cluster_desc(ep_desc, cc);
 }
 
 static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, uint16_t attr,

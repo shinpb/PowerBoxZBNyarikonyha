@@ -21,6 +21,7 @@
 //   temperature 0x8000 (-32768), humidity 0xFFFF, DC int16 0x8000 (-32768)
 // and this converter publishes null for it (Home Assistant: "unknown"), instead of -327.68 / 655.35 / -32.768.
 
+import {Zcl} from 'zigbee-herdsman';
 import * as m from 'zigbee-herdsman-converters/lib/modernExtend';
 import * as reporting from 'zigbee-herdsman-converters/lib/reporting';
 import * as exposes from 'zigbee-herdsman-converters/lib/exposes';
@@ -84,6 +85,57 @@ const fzDcMeasurement = {
     },
 };
 
+// ---------------------------------------------------------------- device fault indication (EP 0x01)
+// Firmware 4.8: standard Binary Input (genBinaryInput, presentValue = any fault) plus a manufacturer-specific
+// cluster with the fault mask (bitmap32). Must match zigbee_manager.h / health.h:
+//   bits 0..15  sensor faults: 0 board, 1..2 DHT1..2, 8..12 INA1..5
+//   bits 16..23 bus faults:    16 I2C init, 17 I2C bus 0, 18 I2C bus 1
+const DIAG_CLUSTER = 'powerboxDiag';
+const DIAG_CLUSTER_ID = 0xfc11;
+const DIAG_ATTR_FAULT_MASK = 0x0000;
+const TYPE_BITMAP32 = 0x1b;
+
+const FAULT_BITS = [
+    [0, 'board'], [1, 'dht1'], [2, 'dht2'],
+    [8, 'ina1'], [9, 'ina2'], [10, 'ina3'], [11, 'ina4'], [12, 'ina5'],
+    [16, 'i2c_init'], [17, 'i2c_bus0'], [18, 'i2c_bus1'],
+];
+const faultText = (mask) => {
+    const names = FAULT_BITS.filter(([bit]) => (mask >>> bit) & 1).map(([, name]) => name);
+    return names.length ? names.join(', ') : 'ok';
+};
+
+const fzFault = {
+    cluster: 'genBinaryInput',
+    type: ['attributeReport', 'readResponse'],
+    convert: (model, msg, publish, options, meta) => {
+        if (msg.data.presentValue === undefined) return undefined;
+        return {fault: Boolean(msg.data.presentValue)};
+    },
+};
+
+const convertFaultMask = (model, msg, publish, options, meta) => {
+    const raw = msg.data.faultMask !== undefined ? msg.data.faultMask : msg.data[DIAG_ATTR_FAULT_MASK];
+    if (raw === undefined || raw === null || Number.isNaN(raw)) return undefined;
+    return {fault_mask: raw, fault_detail: faultText(raw)};
+};
+
+const fzFaultMask = {
+    cluster: DIAG_CLUSTER,
+    type: ['attributeReport', 'readResponse'],
+    convert: convertFaultMask,
+};
+
+// Refresh button / "get": reads the fault state and the mask from the board endpoint
+const tzFault = {
+    key: ['fault', 'fault_detail'],
+    convertGet: async (entity, key, meta) => {
+        const board = meta.device.getEndpoint(BOARD_ENDPOINT.board);
+        await board.read('genBinaryInput', ['presentValue']);
+        await board.read(DIAG_CLUSTER, ['faultMask']);
+    },
+};
+
 // ---------------------------------------------------------------- temperature / humidity
 // The modernExtend converters would publish the invalid raw values as numbers (-327.68 / 655.35).
 // Wrap their fromZigbee converters: an invalid measuredValue is published as null.
@@ -114,7 +166,14 @@ const humidityExtend = nullOnInvalid(
 );
 
 // ---------------------------------------------------------------- exposes
-const dcExposes = [];
+const dcExposes = [
+    exposes.binary('fault', exposes.access.STATE_GET, true, false)
+        .withDescription('Any sensor or bus fault is active')
+        .withCategory('diagnostic'),
+    exposes.text('fault_detail', exposes.access.STATE_GET)
+        .withDescription('Faulty units (board, dhtN, inaN, i2c_*) or "ok"')
+        .withCategory('diagnostic'),
+];
 for (const name of Object.keys(DC_ENDPOINTS)) {
     dcExposes.push(
         e.voltage().withEndpoint(name),
@@ -132,17 +191,52 @@ const definition = {
 
     extend: [
         m.deviceEndpoints({endpoints: {...BOARD_ENDPOINT, ...DHT_ENDPOINTS, ...DC_ENDPOINTS}}),
+        m.deviceAddCustomCluster(DIAG_CLUSTER, {
+            ID: DIAG_CLUSTER_ID,
+            name: DIAG_CLUSTER,
+            attributes: {
+                faultMask: {name: 'faultMask', ID: DIAG_ATTR_FAULT_MASK, type: Zcl.DataType.BITMAP32},
+            },
+            commands: {},
+            commandsResponse: {},
+        }),
         temperatureExtend,
         humidityExtend,
     ],
 
-    fromZigbee: [fzDcMeasurement],
-    toZigbee: [],
+    fromZigbee: [fzDcMeasurement, fzFault, fzFaultMask],
+    toZigbee: [tzFault],
     exposes: dcExposes,
 
     // bind + reporting for the 15 DC endpoints (DHT is configured by the modernExtend above)
     configure: async (device, coordinatorEndpoint) => {
         const failures = [];
+
+        // fault indication on the board endpoint: bind, report on change (max 1 h), read the initial state
+        const board = device.getEndpoint(BOARD_ENDPOINT.board);
+        if (!board) {
+            failures.push(`board: endpoint ${BOARD_ENDPOINT.board} not found`);
+        } else {
+            try {
+                await reporting.bind(board, coordinatorEndpoint, ['genBinaryInput', DIAG_CLUSTER]);
+                await board.configureReporting('genBinaryInput', [
+                    {attribute: 'presentValue', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 1},
+                ]);
+                await board.configureReporting(DIAG_CLUSTER, [
+                    {
+                        attribute: {ID: DIAG_ATTR_FAULT_MASK, type: TYPE_BITMAP32},
+                        minimumReportInterval: 0,
+                        maximumReportInterval: 3600,
+                        reportableChange: 1,
+                    },
+                ]);
+                await board.read('genBinaryInput', ['presentValue']);
+                await board.read(DIAG_CLUSTER, [DIAG_ATTR_FAULT_MASK]);
+            } catch (error) {
+                failures.push(`fault indication (EP ${BOARD_ENDPOINT.board}): ${error.message}`);
+            }
+        }
+
         for (const [name, id] of Object.entries(DC_ENDPOINTS)) {
             const endpoint = device.getEndpoint(id);
             if (!endpoint) {

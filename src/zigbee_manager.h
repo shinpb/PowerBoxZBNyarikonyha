@@ -1,4 +1,13 @@
 #pragma once
+#include <stdint.h>
+
+// Diagnostics on the board endpoint (EP 0x01), see PLAN.md 4.8:
+//  - standard Binary Input cluster (0x000F): PresentValue = 1 when any sensor/bus fault is active,
+//    StatusFlags FAULT bit follows it
+//  - manufacturer-specific cluster ZB_DIAG_CLUSTER_ID, attribute ZB_DIAG_ATTR_FAULT_MASK (bitmap32):
+//    health_zb_mask() (sensor bits 0..15, bus bits 16..23)
+static constexpr uint16_t ZB_DIAG_CLUSTER_ID      = 0xFC11;
+static constexpr uint16_t ZB_DIAG_ATTR_FAULT_MASK = 0x0000;
 
 void init_zb_stack();
 void button_task(void*);

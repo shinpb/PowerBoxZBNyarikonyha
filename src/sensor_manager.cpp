@@ -234,6 +234,29 @@ static bool zb_write_dc(uint8_t ep, int16_t v, int16_t i, int16_t p, bool pre_st
     return true;
 }
 
+// 4.8: device fault indication on the board endpoint (Binary Input + fault mask attribute).
+// Called at the end of every measurement cycle; writes only when the mask changed (under the Zigbee lock
+// so the two measurement tasks cannot interleave their compare/write).
+static bool     s_diag_written = false;
+static uint32_t s_diag_last = 0;
+
+static void diag_publish(bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return;
+    zb_lock(pre_start);
+    uint32_t mask = health_zb_mask();
+    if (!s_diag_written || mask != s_diag_last) {
+        bool    pv    = (mask != 0);
+        uint8_t flags = pv ? EZB_ZCL_BINARY_INPUT_STATUS_FLAGS_FAULT : 0;
+        const uint8_t ep = Config.Zigbee.Board.Endpoint;
+        ZB_SET(ep, EZB_ZCL_CLUSTER_ID_BINARY_INPUT, EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, &pv);
+        ZB_SET(ep, EZB_ZCL_CLUSTER_ID_BINARY_INPUT, EZB_ZCL_ATTR_BINARY_INPUT_STATUS_FLAGS_ID, &flags);
+        ZB_SET(ep, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_FAULT_MASK, &mask);
+        s_diag_last = mask;
+        s_diag_written = true;
+    }
+    zb_unlock(pre_start);
+}
+
 // Set by measure_all_once(): the tasks then skip their first immediate cycle
 // (the DHT sensor needs >= 2 s between two reads).
 static volatile bool s_pre_measured = false;
@@ -307,6 +330,7 @@ static void dht_cycle(bool pre_start) {
             }
 #endif
         }
+        diag_publish(pre_start);
 }
 
 void dht_measurement_task(void *pvParameters) {
@@ -425,6 +449,7 @@ static void dc_cycle(bool pre_start) {
 #ifndef DUMMY_SENSOR_MODE
         ina_update_health();
 #endif
+        diag_publish(pre_start);
 }
 
 void dc_measurement_task(void *pvParameters) {

@@ -258,12 +258,20 @@ static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, u
     ESP_LOGI(Config.Logging.TagReporting, "%s ep=0x%02X: update ret=%d", name, ep, (int)r);
 }
 
+// esp-zigbee-lib >= 2.0.5: disable the Default Response for the automatic reports of one attribute
+// (stops the Default Response flood seen in Z2M, PLAN.md 4.3/4.5). Counted for the summary log line.
+static uint16_t s_dis_rsp_ok = 0, s_dis_rsp_missing = 0;
+
+static void disable_default_rsp(uint8_t ep, uint16_t cluster, uint16_t attr)
+{
+    ezb_zcl_reporting_info_t info = ezb_zcl_reporting_info_find(ep, cluster, EZB_ZCL_CLUSTER_SERVER, attr, 0);
+    if (info == EZB_ZCL_INVALID_REPORTING_INFO) { s_dis_rsp_missing++; return; }
+    if (ezb_zcl_reporting_info_set_dis_def_rsp(info, true) == EZB_ERR_NONE) s_dis_rsp_ok++;
+    else s_dis_rsp_missing++;
+}
+
 static void init_zb_default_reporting()
 {
-    // TODO(esp-zigbee-lib >= 2.0.5): the release notes list an API to enable/disable the
-    // Default Response for automatic attribute reports. Once the library is upgraded,
-    // disable it here (per reporting record) to stop the Default Response flood seen in Z2M
-    // (see PLAN.md 4.3). Not available in 2.0.4 - intentionally not built in yet.
     const auto &R = Config.Reporting.Dht;
 
     ezb_zcl_attr_variable_t dt = { .s16 = (int16_t)(R.ThresholdTemp * 100) };
@@ -283,6 +291,31 @@ static void init_zb_default_reporting()
             EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
             EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, R.MinInterval, R.MaxInterval, &dh);
     }
+
+    // Default Response off for every reportable attribute (records that do not exist yet are only counted)
+    s_dis_rsp_ok = s_dis_rsp_missing = 0;
+    disable_default_rsp(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+                        EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID);
+    disable_default_rsp(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
+                        EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID);
+    disable_default_rsp(Config.Zigbee.Board.Endpoint, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_FAULT_MASK);
+    for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
+        uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
+        disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+                            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID);
+        disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+                            EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID);
+    }
+    for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+        for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
+            uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
+            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID);
+            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID);
+            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID);
+        }
+    }
+    ESP_LOGI(Config.Logging.TagReporting, "Default Response disabled: %u records ok, %u without record",
+             (unsigned)s_dis_rsp_ok, (unsigned)s_dis_rsp_missing);
 }
 
 void init_zb_stack() {

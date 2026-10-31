@@ -1,4 +1,12 @@
 #pragma once
+#include <stdint.h>
+
+// ZCL "invalid / not measurable" attribute values (ZCL spec: Temperature 0x8000, Relative Humidity 0xFFFF,
+// Electrical Measurement DC int16 values 0x8000). Written to the attributes when a sensor is
+// unavailable (4.7); the Z2M converter maps them to null.
+static constexpr int16_t  ZCL_INVALID_TEMP = (int16_t)0x8000;
+static constexpr uint16_t ZCL_INVALID_HUM  = 0xFFFF;
+static constexpr int16_t  ZCL_INVALID_DC   = (int16_t)0x8000;
 
 void init_native_i2c_buses();
 void init_sensors_dht();

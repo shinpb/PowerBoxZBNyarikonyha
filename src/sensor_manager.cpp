@@ -41,8 +41,13 @@ static temperature_sensor_handle_t board_tsens = NULL;
 // ---- Fault handling state (see health.h) ----
 // Consecutive failed cycles; the error flag is set at Config.Health.FailThreshold.
 static uint8_t s_board_fail = 0;
+// "invalid value already written to the Zigbee attributes" flags (4.7): the invalid value is written once
+// per failure streak (retried until the write is allowed, i.e. after the join); a good measurement clears them.
+static bool    s_board_inv = false;
 #ifndef DUMMY_SENSOR_MODE
 static uint8_t s_dht_fail[n_DHT] = {0};
+static bool    s_dht_inv[n_DHT] = {false};
+static bool    s_ina_inv[n_INA] = {false};
 static bool    s_i2c_ready = false;
 static bool    s_ina_desc_ok[n_INA] = {false};   // ina3221_init_desc() done (must run only once: it creates a mutex)
 static bool    s_ina_ok[n_INA] = {false};        // INA fully initialized (readable)
@@ -198,6 +203,37 @@ static inline bool zb_write_allowed(bool pre_start) { return pre_start || is_zig
 static inline void zb_lock(bool pre_start)   { if (!pre_start) esp_zigbee_lock_acquire(portMAX_DELAY); }
 static inline void zb_unlock(bool pre_start) { if (!pre_start) esp_zigbee_lock_release(); }
 
+// Attribute writers (one lock section each). Return false if the write is not allowed yet (not joined).
+static bool zb_write_board(int16_t temp, bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return false;
+    zb_lock(pre_start);
+    ZB_SET(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+           EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, &temp);
+    zb_unlock(pre_start);
+    return true;
+}
+
+static bool zb_write_dht(uint8_t ep, int16_t temp, uint16_t hum, bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return false;
+    zb_lock(pre_start);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+           EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, &temp);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+           EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, &hum);
+    zb_unlock(pre_start);
+    return true;
+}
+
+static bool zb_write_dc(uint8_t ep, int16_t v, int16_t i, int16_t p, bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return false;
+    zb_lock(pre_start);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, &v);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, &i);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, &p);
+    zb_unlock(pre_start);
+    return true;
+}
+
 // Set by measure_all_once(): the tasks then skip their first immediate cycle
 // (the DHT sensor needs >= 2 s between two reads).
 static volatile bool s_pre_measured = false;
@@ -212,20 +248,18 @@ static void dht_cycle(bool pre_start) {
                 ESP_LOGI(Config.Logging.TagMeasurement, "Board: %.2f°C", board_c);
             }
             int16_t measured_board = (int16_t)lroundf(board_c * 100.0f);
-            if (zb_write_allowed(pre_start)) {
-                zb_lock(pre_start);
-                ZB_SET(
-                    Config.Zigbee.Board.Endpoint,
-                    EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-                    EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID,
-                    &measured_board
-                );
-                zb_unlock(pre_start);
+            s_board_inv = false;
+            zb_write_board(measured_board, pre_start);
+        } else {
+            if (board_tsens != NULL) {   // read error (a NULL handle = init failure, already flagged, counter preset)
+                s_board_fail = sat_inc(s_board_fail);
+                diag_inc(g_diag.board_fail);
+                if (s_board_fail >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_BOARD);
             }
-        } else if (board_tsens != NULL) {   // read error (a NULL handle = init failure, already flagged)
-            s_board_fail = sat_inc(s_board_fail);
-            diag_inc(g_diag.board_fail);
-            if (s_board_fail >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_BOARD);
+            // sensor unavailable: report the ZCL invalid value (once per streak)
+            if (s_board_fail >= Config.Health.FailThreshold && !s_board_inv) {
+                s_board_inv = zb_write_board(ZCL_INVALID_TEMP, pre_start);
+            }
         }
         for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
 #ifndef DUMMY_SENSOR_MODE
@@ -241,6 +275,7 @@ static void dht_cycle(bool pre_start) {
                 }
                 if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_DHT(idx));
                 s_dht_fail[idx] = 0;
+                s_dht_inv[idx] = false;
 #else
             static float tick_dht = 0.0;
             tick_dht += 0.1;
@@ -255,27 +290,18 @@ static void dht_cycle(bool pre_start) {
                 uint16_t measured_hum = (uint16_t)(humidity * 100);
                 uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
 
-                if (zb_write_allowed(pre_start)) {
-                    zb_lock(pre_start);
-                    ZB_SET(
-                        ep, 
-                        EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-                        EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID,
-                        &measured_temp
-                    );
-                    ZB_SET(
-                        ep,
-                        EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
-                        EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID,
-                        &measured_hum
-                    );
-                    zb_unlock(pre_start);
-                }
+                zb_write_dht(ep, measured_temp, measured_hum, pre_start);
 #ifndef DUMMY_SENSOR_MODE
             } else {
                 diag_inc(g_diag.dht_fail[idx]);
                 s_dht_fail[idx] = sat_inc(s_dht_fail[idx]);
-                if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_set(HM_SENSOR, HF_SENS_DHT(idx));
+                if (s_dht_fail[idx] >= Config.Health.FailThreshold) {
+                    health_set(HM_SENSOR, HF_SENS_DHT(idx));
+                    // sensor unavailable: report the ZCL invalid values (once per streak)
+                    if (!s_dht_inv[idx]) {
+                        s_dht_inv[idx] = zb_write_dht(Config.Zigbee.Dht.Endpoints[idx], ZCL_INVALID_TEMP, ZCL_INVALID_HUM, pre_start);
+                    }
+                }
                 ESP_LOGW(Config.Logging.TagMeasurement, "DHT %d read failed: %s (ok=%u fail=%u)",
                          idx, esp_err_to_name(dht_err), (unsigned)g_diag.dht_ok[idx], (unsigned)g_diag.dht_fail[idx]);
             }
@@ -313,7 +339,17 @@ static void dc_cycle(bool pre_start) {
                     ESP_LOGI(Config.Logging.TagInitSensor, "INA %d re-init: %s", idx, esp_err_to_name(e));
                     if (e == ESP_OK) { s_ina_ok[idx] = true; s_ina_fail[idx] = 0; diag_inc(g_diag.ina_reinit_ok); }
                 }
-                if (!s_ina_ok[idx]) continue;
+                if (!s_ina_ok[idx]) {
+                    // offline module: report the ZCL invalid values (once per outage)
+                    if (!s_ina_inv[idx]) {
+                        const uint8_t *eps = Config.Zigbee.Ina.Endpoints[idx];
+                        bool all = true;
+                        for (uint8_t ch = 0; ch < INA3221_BUS_NUMBER; ch++)
+                            all = zb_write_dc(eps[ch], ZCL_INVALID_DC, ZCL_INVALID_DC, ZCL_INVALID_DC, pre_start) && all;
+                        s_ina_inv[idx] = all;
+                    }
+                    continue;
+                }
             }
             bool ina_failed = false;
 #endif
@@ -358,37 +394,7 @@ static void dc_cycle(bool pre_start) {
                     int16_t measured_i = (int16_t)(current_mA);
                     int16_t measured_p = (int16_t)(power_mW / 10.0); //cW because of int16
 
-                    if (zb_write_allowed(pre_start)) {
-                        zb_lock(pre_start);
-                        
-                        uint8_t ep_id = Config.Zigbee.Ina.Endpoints[idx][channel];
-                        
-                        // Feszültség
-                        ZB_SET(
-                            ep_id, 
-                            EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                            EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID,
-                            &measured_v
-                        );
-                        
-                        // Áram
-                        ZB_SET(
-                            ep_id,
-                            EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                            EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID,
-                            &measured_i
-                        );
-                        
-                        // Teljesítmény
-                        ZB_SET(
-                            ep_id,
-                            EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                            EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID,
-                            &measured_p
-                        );
-                        
-                        zb_unlock(pre_start);
-                    }
+                    zb_write_dc(Config.Zigbee.Ina.Endpoints[idx][channel], measured_v, measured_i, measured_p, pre_start);
 #ifndef DUMMY_SENSOR_MODE
                 } else { // Measurement failed (the attribute keeps its last value)
                     ina_failed = true;
@@ -404,7 +410,7 @@ static void dc_cycle(bool pre_start) {
             }
 #ifndef DUMMY_SENSOR_MODE
             s_ina_fail[idx] = ina_failed ? sat_inc(s_ina_fail[idx]) : 0;
-            if (!ina_failed) diag_mark(g_diag.ina_last_ok_s[idx]);
+            if (!ina_failed) { diag_mark(g_diag.ina_last_ok_s[idx]); s_ina_inv[idx] = false; }
             if (s_ina_fail[idx] >= Config.Health.FailThreshold) {
                 // Offline: stop polling (every failed access costs ~1-2 s and slows every other module),
                 // probe it again with a re-init every Config.Health.RetryS seconds.

@@ -16,6 +16,10 @@
 //   dcVoltage 0x0100  int16  mV   (divisor 1000)  -> V
 //   dcCurrent 0x0103  int16  mA   (divisor 1000)  -> A
 //   dcPower   0x0106  int16  cW   (divisor 100)   -> W  (1 raw unit = 10 mW)
+//
+// Unavailable sensor (firmware 4.7): the device writes the ZCL "invalid" value into the attribute
+//   temperature 0x8000 (-32768), humidity 0xFFFF, DC int16 0x8000 (-32768)
+// and this converter publishes null for it (Home Assistant: "unknown"), instead of -327.68 / 655.35 / -32.768.
 
 import * as m from 'zigbee-herdsman-converters/lib/modernExtend';
 import * as reporting from 'zigbee-herdsman-converters/lib/reporting';
@@ -50,6 +54,12 @@ const ATTR_DC_CURRENT = 0x0103;
 const ATTR_DC_POWER = 0x0106;
 const TYPE_INT16 = 0x29;
 
+// ZCL invalid measurement values (must match sensor_manager.h)
+const INVALID_INT16 = -32768; // 0x8000: temperature, DC voltage/current/power
+const INVALID_UINT16 = 0xffff; // humidity
+const isInvalid = (raw, invalidValue) =>
+    raw === null || (typeof raw === 'number' && (Number.isNaN(raw) || raw === invalidValue));
+
 // ---------------------------------------------------------------- fromZigbee
 const fzDcMeasurement = {
     cluster: 'haElectricalMeasurement',
@@ -57,20 +67,51 @@ const fzDcMeasurement = {
     convert: (model, msg, publish, options, meta) => {
         // Herdsman may deliver known attributes by name, unknown ones by numeric ID.
         const get = (name, id) => (msg.data[name] !== undefined ? msg.data[name] : msg.data[id]);
-        const round = (value, digits) => Math.round(value * 10 ** digits) / 10 ** digits;
+        // invalid raw value -> null; otherwise scaled and rounded
+        const scale = (raw, divisor, digits) =>
+            isInvalid(raw, INVALID_INT16) ? null : Math.round((raw / divisor) * 10 ** digits) / 10 ** digits;
 
         const payload = {};
         const v = get('dcVoltage', ATTR_DC_VOLTAGE);
         const i = get('dcCurrent', ATTR_DC_CURRENT);
         const p = get('dcPower', ATTR_DC_POWER);
 
-        if (v !== undefined) payload[utils.postfixWithEndpointName('voltage', msg, model, meta)] = round(v / 1000, 3);
-        if (i !== undefined) payload[utils.postfixWithEndpointName('current', msg, model, meta)] = round(i / 1000, 3);
-        if (p !== undefined) payload[utils.postfixWithEndpointName('power', msg, model, meta)] = round(p / 100, 2);
+        if (v !== undefined) payload[utils.postfixWithEndpointName('voltage', msg, model, meta)] = scale(v, 1000, 3);
+        if (i !== undefined) payload[utils.postfixWithEndpointName('current', msg, model, meta)] = scale(i, 1000, 3);
+        if (p !== undefined) payload[utils.postfixWithEndpointName('power', msg, model, meta)] = scale(p, 100, 2);
 
         return Object.keys(payload).length ? payload : undefined;
     },
 };
+
+// ---------------------------------------------------------------- temperature / humidity
+// The modernExtend converters would publish the invalid raw values as numbers (-327.68 / 655.35).
+// Wrap their fromZigbee converters: an invalid measuredValue is published as null.
+const nullOnInvalid = (extend, cluster, property, invalidValue) => {
+    extend.fromZigbee = extend.fromZigbee.map((converter) => {
+        if (converter.cluster !== cluster) return converter;
+        return {
+            ...converter,
+            convert: (model, msg, publish, options, meta) => {
+                if (msg.data.measuredValue !== undefined && isInvalid(msg.data.measuredValue, invalidValue)) {
+                    return {[utils.postfixWithEndpointName(property, msg, model, meta)]: null};
+                }
+                return converter.convert(model, msg, publish, options, meta);
+            },
+        };
+    });
+    return extend;
+};
+
+// min/max in seconds, change in raw ZCL units (0.01 degC / 0.01 %RH)
+const temperatureExtend = nullOnInvalid(
+    m.temperature({endpointNames: ['board', ...Object.keys(DHT_ENDPOINTS)], reporting: {min: 5, max: 60, change: 50}}),
+    'msTemperatureMeasurement', 'temperature', INVALID_INT16,
+);
+const humidityExtend = nullOnInvalid(
+    m.humidity({endpointNames: Object.keys(DHT_ENDPOINTS), reporting: {min: 5, max: 60, change: 200}}),
+    'msRelativeHumidity', 'humidity', INVALID_UINT16,
+);
 
 // ---------------------------------------------------------------- exposes
 const dcExposes = [];
@@ -91,9 +132,8 @@ const definition = {
 
     extend: [
         m.deviceEndpoints({endpoints: {...BOARD_ENDPOINT, ...DHT_ENDPOINTS, ...DC_ENDPOINTS}}),
-        // min/max in seconds, change in raw ZCL units (0.01 degC / 0.01 %RH)
-        m.temperature({endpointNames: ['board', ...Object.keys(DHT_ENDPOINTS)], reporting: {min: 5, max: 60, change: 50}}),
-        m.humidity({endpointNames: Object.keys(DHT_ENDPOINTS), reporting: {min: 5, max: 60, change: 200}}),
+        temperatureExtend,
+        humidityExtend,
     ],
 
     fromZigbee: [fzDcMeasurement],

@@ -130,7 +130,7 @@ void init_zb_ep_dht(ezb_af_device_desc_t dev_desc) {
 
         // Humidity cluster
         ezb_zcl_rel_humidity_measurement_cluster_config_t hum_cfg = {
-            .measured_value = 0xFFFF, // 0xFFFF = Érvénytelen/Nincs még mérés
+            .measured_value = ZCL_INVALID_HUM, // invalid until the first measurement
             .min_measured_value = (uint16_t)(Config.Sensor.Dht.MinHum * 100),
             .max_measured_value = (uint16_t)(Config.Sensor.Dht.MaxHum * 100)
         };
@@ -163,6 +163,11 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
             };
             ezb_zcl_cluster_desc_t electrical_cluster = ezb_zcl_electrical_measurement_create_cluster_desc(&em_cfg, EZB_ZCL_CLUSTER_SERVER);
 
+            // No measurement yet = invalid value (not 0: 0 V / 0 A would be a plausible reading)
+            dc_val_v[idx][channel] = ZCL_INVALID_DC;
+            dc_val_i[idx][channel] = ZCL_INVALID_DC;
+            dc_val_p[idx][channel] = ZCL_INVALID_DC;
+
             div_v_arr[idx][channel]    = 1000;
 
             div_i_arr[idx][channel]    = 1000;
@@ -186,7 +191,7 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
 
 static void add_temp_cluster(ezb_af_ep_desc_t ep_desc, float min_c, float max_c) {
     ezb_zcl_temperature_measurement_cluster_config_t cfg = {
-        .measured_value     = (int16_t)0x8000,   // érvénytelen, amíg nincs mérés
+        .measured_value     = ZCL_INVALID_TEMP,   // invalid until the first measurement
         .min_measured_value = (int16_t)(min_c * 100),
         .max_measured_value = (int16_t)(max_c * 100)
     };

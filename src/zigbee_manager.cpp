@@ -492,11 +492,6 @@ void zigbee_mainloop_task(void *pvParameters) {
     ESP_LOGI(Config.Logging.TagZigbee, "Init Zigbee DC endpoints");
     init_zb_ep_dc(dev_desc);
 
-    nvs_stats_t st0;
-    if (nvs_get_stats(NULL, &st0) == ESP_OK)
-        ESP_LOGI(Config.Logging.TagZigbee, "PRE-REG NVS used=%u free=%u",
-                 (unsigned)st0.used_entries, (unsigned)st0.free_entries);
-
     ESP_LOGI(Config.Logging.TagZigbee, "Registering Endpoints");
     int64_t t0 = esp_timer_get_time();
     auto rr = ezb_af_device_desc_register(dev_desc);

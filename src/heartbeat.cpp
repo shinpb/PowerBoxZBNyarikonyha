@@ -123,5 +123,5 @@ void heartbeat_start() {
     started = true;
     ESP_LOGI(Config.Logging.TagHeartbeat, "started: period %u s, extended lines every %u",
              (unsigned)Config.Health.HeartbeatS, (unsigned)Config.Health.HeartbeatLongEvery);
-    xTaskCreate(heartbeat_task, "Task_HB", 3072, NULL, 1, NULL);
+    xTaskCreate(heartbeat_task, "Task_HB", 4096, NULL, 1, NULL);
 }

@@ -11,7 +11,10 @@
 #include "ezbee/zcl/cluster/binary_input.h"
 #include "ezbee/zcl/cluster/custom.h"
 #include "nvs_flash.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
+#include <math.h>
 #include "ina3221.h"
 
 // Internal components
@@ -246,17 +249,35 @@ static void add_diag_clusters(ezb_af_ep_desc_t ep_desc) {
     ezb_af_endpoint_add_cluster_desc(ep_desc, cc);
 }
 
+// ---- Firmware default reporting (D3/N4, Config.Reporting) ----
+// Written ONCE, on a factory-new start before the first join, by reporting_defaults_task (below). One update takes
+// ~0.5 s (all 52 records: ~26 s), too long for the signal handler, so the task takes the Zigbee lock for every single
+// call and releases it between the records. After the join the coordinator (Z2M configure) overwrites the values.
+static unsigned s_def_ok = 0, s_def_missing = 0;
+
 static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, uint16_t attr,
                                uint16_t min_s, uint16_t max_s, const ezb_zcl_attr_variable_t *delta)
 {
+    esp_zigbee_lock_acquire(portMAX_DELAY);
     ezb_zcl_reporting_info_t info = ezb_zcl_reporting_info_find(ep, cluster, EZB_ZCL_CLUSTER_SERVER, attr, 0);
-    if (info == EZB_ZCL_INVALID_REPORTING_INFO) {
+    const bool found = (info != EZB_ZCL_INVALID_REPORTING_INFO);
+    ezb_err_t r = EZB_ERR_NONE;
+    if (found) r = ezb_zcl_reporting_info_update(info, min_s, max_s, delta);
+    esp_zigbee_lock_release();
+
+    if (!found) {
+        s_def_missing++;
         ESP_LOGW(Config.Logging.TagReporting, "%s ep=0x%02X: NO reporting record", name, ep);
-        return;
+    } else if (r != EZB_ERR_NONE) {
+        s_def_missing++;
+        ESP_LOGW(Config.Logging.TagReporting, "%s ep=0x%02X: update failed ret=%d", name, ep, (int)r);
+    } else {
+        s_def_ok++;
+        if (Config.Logging.EnabledReports) ESP_LOGI(Config.Logging.TagReporting, "%s ep=0x%02X: update ret=%d", name, ep, (int)r);
     }
-    auto r = ezb_zcl_reporting_info_update(info, min_s, max_s, delta);
-    ESP_LOGI(Config.Logging.TagReporting, "%s ep=0x%02X: update ret=%d", name, ep, (int)r);
 }
+
+static int16_t scaled_s16(float v, float mul) { return (int16_t)lroundf(v * mul); }
 
 // esp-zigbee-lib >= 2.0.5: disable the Default Response for the automatic reports of one attribute
 // (stops the Default Response flood seen in Z2M, PLAN.md 4.3/4.5). Counted for the summary log line.
@@ -270,29 +291,67 @@ static void disable_default_rsp(uint8_t ep, uint16_t cluster, uint16_t attr)
     else s_dis_rsp_missing++;
 }
 
-static void init_zb_default_reporting()
+// Writes the default reporting of every category enabled in Config.Reporting (global + per category switch).
+static void write_default_reporting()
 {
-    const auto &R = Config.Reporting.Dht;
+    const auto &RP = Config.Reporting;
+    s_def_ok = s_def_missing = 0;
 
-    ezb_zcl_attr_variable_t dt = { .s16 = (int16_t)(R.ThresholdTemp * 100) };
-    ezb_zcl_attr_variable_t dh = { .u16 = (uint16_t)(R.ThresholdHum * 100) };
-
-    // board + DHT hőmérséklet
-    set_default_report("temp", Config.Zigbee.Board.Endpoint,
-        EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-        EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, R.MinInterval, R.MaxInterval, &dt);
-
-    for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
-        uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
-        set_default_report("temp", ep,
+    if (RP.Board.Enabled) {
+        ezb_zcl_attr_variable_t dt = { .s16 = scaled_s16(RP.Board.ThresholdTemp, 100) };
+        set_default_report("board temp", Config.Zigbee.Board.Endpoint,
             EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, R.MinInterval, R.MaxInterval, &dt);
-        set_default_report("hum", ep,
-            EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
-            EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, R.MinInterval, R.MaxInterval, &dh);
+            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RP.Board.MinInterval, RP.Board.MaxInterval, &dt);
     }
 
-    // Default Response off for every reportable attribute (records that do not exist yet are only counted)
+    if (RP.Dht.Enabled) {
+        ezb_zcl_attr_variable_t dt = { .s16 = scaled_s16(RP.Dht.ThresholdTemp, 100) };
+        ezb_zcl_attr_variable_t dh = { .u16 = (uint16_t)lroundf(RP.Dht.ThresholdHum * 100) };
+        for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
+            uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
+            set_default_report("dht temp", ep,
+                EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+                EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RP.Dht.MinInterval, RP.Dht.MaxInterval, &dt);
+            set_default_report("dht hum", ep,
+                EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+                EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, RP.Dht.MinInterval, RP.Dht.MaxInterval, &dh);
+        }
+    }
+
+    if (RP.Dc.Enabled) {
+        // raw units follow the divisors of the endpoints: V and I in mV/mA (1000), power in 10 mW (100)
+        ezb_zcl_attr_variable_t dv = { .s16 = scaled_s16(RP.Dc.ThresholdVolt, 1000) };
+        ezb_zcl_attr_variable_t di = { .s16 = scaled_s16(RP.Dc.ThresholdCur, 1000) };
+        ezb_zcl_attr_variable_t dp = { .s16 = scaled_s16(RP.Dc.ThresholdPwr, 100) };
+        for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+            for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
+                uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
+                set_default_report("dc V", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &dv);
+                set_default_report("dc I", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &di);
+                set_default_report("dc P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &dp);
+            }
+        }
+    }
+
+    if (RP.Fault.Enabled) {
+        // discrete attributes (bool, bitmap32): any change is reported, the delta is not used
+        ezb_zcl_attr_variable_t none = {};
+        const uint8_t ep = Config.Zigbee.Board.Endpoint;
+        set_default_report("fault", ep, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
+            EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, RP.Fault.MinInterval, RP.Fault.MaxInterval, &none);
+        set_default_report("fault mask", ep, ZB_DIAG_CLUSTER_ID,
+            ZB_DIAG_ATTR_FAULT_MASK, RP.Fault.MinInterval, RP.Fault.MaxInterval, &none);
+    }
+}
+
+// Default Response off for every reportable attribute (records that do not exist yet are only counted).
+// Runs at EVERY start: it is quick (no per-record delay like the updates above) and nothing says the flag
+// survives a reboot.
+static void init_zb_disable_default_rsp()
+{
     s_dis_rsp_ok = s_dis_rsp_missing = 0;
     disable_default_rsp(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
                         EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID);
@@ -316,6 +375,43 @@ static void init_zb_default_reporting()
     }
     ESP_LOGI(Config.Logging.TagReporting, "Default Response disabled: %u records ok, %u without record",
              (unsigned)s_dis_rsp_ok, (unsigned)s_dis_rsp_missing);
+}
+
+// Factory-new start: write the firmware defaults first, then start the steering (so the coordinator's configure
+// after the join always comes AFTER the defaults and overwrites them, never the other way round).
+static void reporting_defaults_task(void *pv)
+{
+    (void)pv;
+    const int64_t t0 = esp_timer_get_time();
+    write_default_reporting();
+    ESP_LOGI(Config.Logging.TagReporting, "Defaults written: %u ok, %u missing/failed, %lld ms",
+             s_def_ok, s_def_missing, (long long)((esp_timer_get_time() - t0) / 1000));
+
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    init_zb_disable_default_rsp();   // again, after the updates (an update may reset the flag; harmless otherwise)
+    if (ezb_bdb_is_factory_new()) {
+        (void)ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
+    }
+    esp_zigbee_lock_release();
+    vTaskDelete(NULL);
+}
+
+// true: the task was started and it will start the steering; false: nothing to write, the caller starts the steering.
+static bool start_reporting_defaults()
+{
+    static bool started = false;
+    const auto &RP = Config.Reporting;
+    if (started) return true;
+    if (!RP.Enabled || !(RP.Board.Enabled || RP.Dht.Enabled || RP.Dc.Enabled || RP.Fault.Enabled)) {
+        ESP_LOGI(Config.Logging.TagReporting, "Firmware default reporting is off (config)");
+        return false;
+    }
+    if (xTaskCreate(reporting_defaults_task, "Rep_defaults", 4096, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGW(Config.Logging.TagReporting, "defaults task not started, the coordinator has to configure the reporting");
+        return false;
+    }
+    started = true;
+    return true;
 }
 
 void init_zb_stack() {
@@ -396,12 +492,19 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             measure_all_once();
             // D7: the registration (long NVS iteration) is over and the stack runs, the measurement tasks may start
             start_measurement_tasks();
-            init_zb_default_reporting();
+            // D3/N4: the Default Response is disabled at EVERY start (quick); the firmware default intervals and
+            // thresholds are written only on a factory-new start (below). A plain reboot must not overwrite what
+            // Z2M configured (the stack keeps the records across reboots, PLAN.md R1 - verified by the reboot test).
+            init_zb_disable_default_rsp();
             if (ezb_bdb_is_factory_new()) {
                 health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);        // set first: no low glitch on the pin
                 health_clear(HM_ZIGBEE, HF_STARTING);
-                ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
+                // the defaults task writes the records (~26 s for all of them) and then starts the steering itself
+                if (!start_reporting_defaults()) {
+                    ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
+                }
             } else {
+                ESP_LOGI(Config.Logging.TagReporting, "Reporting defaults not written (configured device, records kept)");
                 health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED | HF_STARTING);
                 is_zigbee_connected = true;
                 ESP_LOGI(Config.Logging.TagZigbee, "Device reboot");

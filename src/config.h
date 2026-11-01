@@ -62,22 +62,45 @@ struct AppConfig {
         const uint8_t  HeartbeatLongEvery = 5; // every N-th heartbeat also prints the extended diagnostic lines, 0 = never
     } Health;
 
-    // Zigbee ZCL Reporting Rules
+    // Zigbee ZCL Reporting Rules = FIRMWARE DEFAULTS (D3/N4)
+    // Written once, on a factory-new start BEFORE the first join (a task, ~0.5 s per record, ~26 s for all 52
+    // records; the steering starts after it). The coordinator (Z2M: configure on pairing, Reconfigure) overwrites
+    // them afterwards, and a plain reboot never touches them. Enabled = 0: that category is left entirely to the
+    // coordinator (its records stay at the stack default until the coordinator configures them).
+    // Keep the values equal to the converter's configure() (D4): temperature 5/60 s 0.5 C, humidity 2 %,
+    // DC 2/30 s 60 mV / 30 mA / 50 mW, fault 0/3600 s.
     struct {
-        struct {
+        const uint8_t Enabled = 1;          // global switch, 0 = no firmware default reporting at all
+
+        struct {                            // board temperature (EP 1)
+            const uint8_t  Enabled = 1;
             const uint16_t MaxInterval = 60;
             const uint16_t MinInterval = 5;
-            const float ThresholdTemp = 0.5f;
-            const float ThresholdHum = 2.0f;
+            const float ThresholdTemp = 0.5f;   // C
+        } Board;
+
+        struct {                            // DHT temperature and humidity (EP 2, 3)
+            const uint8_t  Enabled = 1;
+            const uint16_t MaxInterval = 60;
+            const uint16_t MinInterval = 5;
+            const float ThresholdTemp = 0.5f;   // C
+            const float ThresholdHum = 2.0f;    // %
         } Dht;
-        
-        struct {
-            const uint16_t MaxInterval = 60;
-            const uint16_t MinInterval = 5;
-            const float ThresholdVolt = 0.06f;
-            const float ThresholdCur = 0.03f;
-            const float ThresholdPwr = 0.05f;
+
+        struct {                            // 15 x (V, I, P) DC channels, 45 records
+            const uint8_t  Enabled = 1;
+            const uint16_t MaxInterval = 30;
+            const uint16_t MinInterval = 2;
+            const float ThresholdVolt = 0.06f;  // V
+            const float ThresholdCur = 0.03f;   // A
+            const float ThresholdPwr = 0.05f;   // W
         } Dc;
+
+        struct {                            // fault indication: Binary Input (EP 1) + 0xFC11 fault mask
+            const uint8_t  Enabled = 1;
+            const uint16_t MaxInterval = 3600;
+            const uint16_t MinInterval = 0;
+        } Fault;
     } Reporting;
 
     // I2C Bus Configuration

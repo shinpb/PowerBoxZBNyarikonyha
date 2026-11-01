@@ -25,6 +25,7 @@
 #include "heartbeat.h"
 #include "config.h"
 
+
 #define ZB_SET(ep, cl, at, val) do {                                              \
     auto st_ = ezb_zcl_set_attr_value((ep), (cl), EZB_ZCL_CLUSTER_SERVER, (at),   \
                                       EZB_ZCL_STD_MANUF_CODE, (val), false);      \
@@ -293,7 +294,9 @@ static void dht_cycle(bool pre_start) {
                 diag_inc(g_diag.dht_ok[idx]);
                 diag_mark(g_diag.dht_last_ok_s[idx]);
                 if (s_dht_fail[idx] > 0) {
-                    ESP_LOGI(Config.Logging.TagMeasurement, "DHT %d recovered after %u failed reads",
+                    // WARN on purpose (PLAN.md 4.6a): as INFO this line was intermittently missing from the
+                    // serial log (also in a raw terminal capture); the failure line is WARN as well.
+                    ESP_LOGW(Config.Logging.TagMeasurement, "DHT %d recovered after %u failed reads",
                              idx, (unsigned)s_dht_fail[idx]);
                 }
                 if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_DHT(idx));

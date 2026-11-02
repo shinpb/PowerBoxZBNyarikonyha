@@ -5,6 +5,8 @@
 #include "dht.h"
 // Drivers
 #include "driver/gpio.h"
+// Sys
+#include "esp_log.h"
 // STDlib
 #include <stdint.h>
 
@@ -27,6 +29,17 @@ struct AppConfig {
         const gpio_num_t ButtonPin = GPIO_NUM_9;
     } Device;
 
+    // FreeRTOS tasks (stack in bytes, priority). Stack sizes are reviewed in phase 7 (see the heartbeat "stack_free" values).
+    struct TaskDef { const uint32_t Stack; const uint8_t Prio; };
+    struct {
+        const TaskDef ZigbeeMain      = { 16384, 5 };   // "Zigbee_main"
+        const TaskDef ReportDefaults  = { 4096,  3 };   // "Rep_defaults" (one-shot)
+        const TaskDef MeasDht         = { 4096,  1 };   // "Task_DHT" (DHT + board temperature)
+        const TaskDef MeasDc          = { 4096,  1 };   // "Task_DC"
+        const TaskDef Heartbeat       = { 4096,  1 };   // "Task_HB"
+        const TaskDef Button          = { 2048,  1 };   // "Task_Button"
+    } Tasks;
+
     // Measurement Intervals
     struct {
         const int DhtMs = 3000;
@@ -37,6 +50,8 @@ struct AppConfig {
     struct {
         const uint8_t EnabledMeasurements = 0;
         const uint8_t EnabledReports = 1;
+        const uint8_t InaDiag = 1;           // 1 = run the INA3221 register dump (ina_diag()) at boot; it can delay the Zigbee start
+        // Topics: every log line belongs to one topic (tag). Use the LOGx_<TOPIC>() macros below (end of file).
         const char* TagSetup = "Setup";
         const char* TagInitSensor = "InitSensor";
         const char* TagInitBus = "InitBus";
@@ -45,6 +60,7 @@ struct AppConfig {
         const char* TagReporting = "Reporting";
         const char* TagHealth = "Health";
         const char* TagHeartbeat = "Heartbeat";
+        const char* TagInaDiag = "INADiag";
     } Logging;
 
     // Error indication & fault handling (see health.h)
@@ -136,7 +152,8 @@ struct AppConfig {
         
         struct {
             const uint8_t Count = n_INA;
-            const uint8_t CountBus0 = 4;
+            const uint8_t CountBus0 = 4;       // modules 0..CountBus0-1 on I2C bus 0, the rest on bus 1
+            const uint8_t BaseAddr = 0x40;     // I2C address of the first module on each bus (A0/A1 strapping: +0, +1, ...)
             const float Shunts[n_INA][INA3221_BUS_NUMBER] = {
                 {0.1f, 0.1f, 0.1f},
                 {0.1f, 0.1f, 0.1f},
@@ -155,6 +172,8 @@ struct AppConfig {
     // Zigbee Stack & Endpoint Mappings
     struct {
         const uint8_t Disabled = 0;
+        const uint8_t MaxChildren = 10;        // router: max. directly connected end devices
+        const uint8_t BindTableSize = 32;      // APS binding table source size (the coordinator binds ~20 clusters, default 16 is too small)
         struct {
             const uint8_t Endpoint = 0x01;
         } Board;
@@ -178,3 +197,43 @@ struct AppConfig {
     } Zigbee;
 };
 extern const AppConfig Config;
+
+// ******** Log macros per topic ********
+// LOG<level>_<TOPIC>(format, ...) = ESP_LOG<level>(Config.Logging.Tag<Topic>, format, ...). The tag text comes from
+// Config.Logging, so a topic can be renamed in one place.
+#define LOGE_SETUP(...)        ESP_LOGE(Config.Logging.TagSetup, __VA_ARGS__)
+#define LOGW_SETUP(...)        ESP_LOGW(Config.Logging.TagSetup, __VA_ARGS__)
+#define LOGI_SETUP(...)        ESP_LOGI(Config.Logging.TagSetup, __VA_ARGS__)
+#define LOGD_SETUP(...)        ESP_LOGD(Config.Logging.TagSetup, __VA_ARGS__)
+#define LOGE_INIT_SENSOR(...)  ESP_LOGE(Config.Logging.TagInitSensor, __VA_ARGS__)
+#define LOGW_INIT_SENSOR(...)  ESP_LOGW(Config.Logging.TagInitSensor, __VA_ARGS__)
+#define LOGI_INIT_SENSOR(...)  ESP_LOGI(Config.Logging.TagInitSensor, __VA_ARGS__)
+#define LOGD_INIT_SENSOR(...)  ESP_LOGD(Config.Logging.TagInitSensor, __VA_ARGS__)
+#define LOGE_INIT_BUS(...)     ESP_LOGE(Config.Logging.TagInitBus, __VA_ARGS__)
+#define LOGW_INIT_BUS(...)     ESP_LOGW(Config.Logging.TagInitBus, __VA_ARGS__)
+#define LOGI_INIT_BUS(...)     ESP_LOGI(Config.Logging.TagInitBus, __VA_ARGS__)
+#define LOGD_INIT_BUS(...)     ESP_LOGD(Config.Logging.TagInitBus, __VA_ARGS__)
+#define LOGE_ZB(...)           ESP_LOGE(Config.Logging.TagZigbee, __VA_ARGS__)
+#define LOGW_ZB(...)           ESP_LOGW(Config.Logging.TagZigbee, __VA_ARGS__)
+#define LOGI_ZB(...)           ESP_LOGI(Config.Logging.TagZigbee, __VA_ARGS__)
+#define LOGD_ZB(...)           ESP_LOGD(Config.Logging.TagZigbee, __VA_ARGS__)
+#define LOGE_MEAS(...)         ESP_LOGE(Config.Logging.TagMeasurement, __VA_ARGS__)
+#define LOGW_MEAS(...)         ESP_LOGW(Config.Logging.TagMeasurement, __VA_ARGS__)
+#define LOGI_MEAS(...)         ESP_LOGI(Config.Logging.TagMeasurement, __VA_ARGS__)
+#define LOGD_MEAS(...)         ESP_LOGD(Config.Logging.TagMeasurement, __VA_ARGS__)
+#define LOGE_REP(...)          ESP_LOGE(Config.Logging.TagReporting, __VA_ARGS__)
+#define LOGW_REP(...)          ESP_LOGW(Config.Logging.TagReporting, __VA_ARGS__)
+#define LOGI_REP(...)          ESP_LOGI(Config.Logging.TagReporting, __VA_ARGS__)
+#define LOGD_REP(...)          ESP_LOGD(Config.Logging.TagReporting, __VA_ARGS__)
+#define LOGE_HEALTH(...)       ESP_LOGE(Config.Logging.TagHealth, __VA_ARGS__)
+#define LOGW_HEALTH(...)       ESP_LOGW(Config.Logging.TagHealth, __VA_ARGS__)
+#define LOGI_HEALTH(...)       ESP_LOGI(Config.Logging.TagHealth, __VA_ARGS__)
+#define LOGD_HEALTH(...)       ESP_LOGD(Config.Logging.TagHealth, __VA_ARGS__)
+#define LOGE_HB(...)           ESP_LOGE(Config.Logging.TagHeartbeat, __VA_ARGS__)
+#define LOGW_HB(...)           ESP_LOGW(Config.Logging.TagHeartbeat, __VA_ARGS__)
+#define LOGI_HB(...)           ESP_LOGI(Config.Logging.TagHeartbeat, __VA_ARGS__)
+#define LOGD_HB(...)           ESP_LOGD(Config.Logging.TagHeartbeat, __VA_ARGS__)
+#define LOGE_INADIAG(...)      ESP_LOGE(Config.Logging.TagInaDiag, __VA_ARGS__)
+#define LOGW_INADIAG(...)      ESP_LOGW(Config.Logging.TagInaDiag, __VA_ARGS__)
+#define LOGI_INADIAG(...)      ESP_LOGI(Config.Logging.TagInaDiag, __VA_ARGS__)
+#define LOGD_INADIAG(...)      ESP_LOGD(Config.Logging.TagInaDiag, __VA_ARGS__)

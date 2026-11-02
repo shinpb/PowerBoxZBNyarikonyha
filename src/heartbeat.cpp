@@ -43,8 +43,7 @@ static int stack_free(const char *name) {
 }
 
 static void print_short() {
-    const char *tag = Config.Logging.TagHeartbeat;
-    ESP_LOGI(tag, "up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d ZB=%d HB=%d",
+    LOGI_HB("up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d ZB=%d HB=%d",
              (unsigned)diag_uptime_s(),
              (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(),
@@ -56,11 +55,10 @@ static void print_short() {
 }
 
 static void print_long() {
-    const char *tag = Config.Logging.TagHeartbeat;
     char b[200];
     size_t p;
 
-    ESP_LOGI(tag, "cycle ms: dht last=%u max=%u | dc last=%u max=%u over=%u (period %d)",
+    LOGI_HB("cycle ms: dht last=%u max=%u | dc last=%u max=%u over=%u (period %d)",
              (unsigned)g_diag.dht_cycle_last_ms, (unsigned)g_diag.dht_cycle_max_ms,
              (unsigned)g_diag.dc_cycle_last_ms, (unsigned)g_diag.dc_cycle_max_ms,
              (unsigned)g_diag.dc_overruns, Config.Measurement.DcMs);
@@ -73,7 +71,7 @@ static void print_long() {
     for (int i = 0; i < Config.Sensor.Ina.Count; i++)
         append(b, sizeof b, p, " %u", (unsigned)g_diag.ina_offline[i]);
     append(b, sizeof b, p, " reinit ok/try=%u/%u", (unsigned)g_diag.ina_reinit_ok, (unsigned)g_diag.ina_reinit_try);
-    ESP_LOGI(tag, "%s", b);
+    LOGI_HB("%s", b);
 
     p = 0; b[0] = 0;
     append(b, sizeof b, p, "age s: board=");
@@ -88,11 +86,11 @@ static void print_long() {
         append(b, sizeof b, p, " %d=", i);
         append_age(b, sizeof b, p, g_diag.ina_last_ok_s[i]);
     }
-    ESP_LOGI(tag, "%s", b);
+    LOGI_HB("%s", b);
 
     nvs_stats_t st;
     bool have_nvs = (nvs_get_stats(NULL, &st) == ESP_OK);
-    ESP_LOGI(tag, "zb: joined=%d rsp ok/err=%u/%u join ok/fail=%u/%u leave=%u start_fail=%u | nvs used/free=%u/%u",
+    LOGI_HB("zb: joined=%d rsp ok/err=%u/%u join ok/fail=%u/%u leave=%u start_fail=%u | nvs used/free=%u/%u",
              (int)is_zigbee_connected,
              (unsigned)(g_diag.zb_default_rsp - g_diag.zb_default_rsp_err), (unsigned)g_diag.zb_default_rsp_err,
              (unsigned)g_diag.zb_join_ok, (unsigned)g_diag.zb_join_fail,
@@ -121,7 +119,7 @@ void heartbeat_start() {
     static bool started = false;
     if (started) return;
     started = true;
-    ESP_LOGI(Config.Logging.TagHeartbeat, "started: period %u s, extended lines every %u",
+    LOGI_HB("started: period %u s, extended lines every %u",
              (unsigned)Config.Health.HeartbeatS, (unsigned)Config.Health.HeartbeatLongEvery);
-    xTaskCreate(heartbeat_task, "Task_HB", 4096, NULL, 1, NULL);
+    xTaskCreate(heartbeat_task, "Task_HB", Config.Tasks.Heartbeat.Stack, NULL, Config.Tasks.Heartbeat.Prio, NULL);
 }

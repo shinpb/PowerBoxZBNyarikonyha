@@ -54,13 +54,10 @@ static int16_t dc_val_i[n_INA][INA3221_BUS_NUMBER] = {0};
 static int16_t dc_val_p[n_INA][INA3221_BUS_NUMBER] = {0};
 
 
-// Divisors: voltage mV -> 1000, current mA -> 1000, power cW -> 100
+// Divisor attribute storage (values: ZCL_DC_DIV_* in sensor_manager.h; the stack keeps the pointers)
 static uint16_t div_v_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
-
 static uint16_t div_i_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
-
 static uint16_t div_p_arr[n_INA][INA3221_BUS_NUMBER]    = {0};
-
 
 
 static ezb_af_ep_desc_t create_ep(uint8_t ep, uint16_t device_id) {
@@ -81,7 +78,7 @@ static void zcl_str16(uint8_t buf[17], const char *src) {
 }
 
 void init_zb_basic_cluster(ezb_af_ep_desc_t cluster_list) {
-    ESP_LOGI(Config.Logging.TagZigbee, "init_zb_basic_cluster");
+    LOGI_ZB("init_zb_basic_cluster");
     // ZCLVersion and PowerSource are mandatory attributes: the stack creates them from this config
     // (add_attr on them is not needed). zcl_version 8 = the library default read by Z2M so far.
     ezb_zcl_basic_cluster_server_config_t basic_cfg = {};
@@ -114,7 +111,7 @@ void init_zb_basic_cluster(ezb_af_ep_desc_t cluster_list) {
 
     // One-time info log of the Basic values (identification check against Z2M).
     // ZCL strings are length-prefixed: byte 0 = length, text starts at byte 1.
-    ESP_LOGI(Config.Logging.TagZigbee, "Basic: mfr=%.*s model=%.*s powerSrc=0x%02X appVer=%u stackVer=%u hwVer=%u swBuildId=%.*s dateCode=%.*s",
+    LOGI_ZB("Basic: mfr=%.*s model=%.*s powerSrc=0x%02X appVer=%u stackVer=%u hwVer=%u swBuildId=%.*s dateCode=%.*s",
              (int)Config.Device.Manufacturer[0], Config.Device.Manufacturer + 1,
              (int)Config.Device.Model[0], Config.Device.Model + 1,
              (unsigned)Config.Device.PowerSource, (unsigned)app_version, (unsigned)stack_version, (unsigned)hw_version,
@@ -129,11 +126,11 @@ void init_zb_ep_dht(ezb_af_device_desc_t dev_desc) {
     // Each DHT sensor
     for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
         uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
-        ESP_LOGI(Config.Logging.TagZigbee, "Create EP: DHT %d (EP 0x%X)", idx, ep);
+        LOGI_ZB("Create EP: DHT %d (EP 0x%X)", idx, ep);
 
         // Endpoint
         ezb_af_ep_desc_t cluster_list = create_ep(ep, EZB_ZHA_TEMPERATURE_SENSOR_DEVICE_ID);
-        if (!cluster_list) { ESP_LOGE(Config.Logging.TagZigbee, "EP 0x%X create failed", ep); continue; }
+        if (!cluster_list) { LOGE_ZB("EP 0x%X create failed", ep); continue; }
 
 
         // Temperature cluster
@@ -161,11 +158,11 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
             
             // ZB Endpiont ID
             uint8_t ep = Config.Zigbee.Ina.Endpoints[idx][channel];
-            ESP_LOGI(Config.Logging.TagZigbee, "Create EP: DC %d/%d (EP 0x%X)", idx, channel, ep);
+            LOGI_ZB("Create EP: DC %d/%d (EP 0x%X)", idx, channel, ep);
             
             // Endpoint
             ezb_af_ep_desc_t cluster_list = create_ep(ep, EZB_ZHA_SIMPLE_SENSOR_DEVICE_ID);
-            if (!cluster_list) { ESP_LOGE(Config.Logging.TagZigbee, "EP 0x%X create failed", ep); continue; }
+            if (!cluster_list) { LOGE_ZB("EP 0x%X create failed", ep); continue; }
 
 
             // Electrical measurement cluster
@@ -179,11 +176,9 @@ void init_zb_ep_dc(ezb_af_device_desc_t dev_desc) {
             dc_val_i[idx][channel] = ZCL_INVALID_DC;
             dc_val_p[idx][channel] = ZCL_INVALID_DC;
 
-            div_v_arr[idx][channel]    = 1000;
-
-            div_i_arr[idx][channel]    = 1000;
-
-            div_p_arr[idx][channel]    = 100;
+            div_v_arr[idx][channel] = ZCL_DC_DIV_V;
+            div_i_arr[idx][channel] = ZCL_DC_DIV_I;
+            div_p_arr[idx][channel] = ZCL_DC_DIV_P;
 
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, &dc_val_v[idx][channel]);
             ezb_zcl_electrical_measurement_cluster_desc_add_attr(electrical_cluster, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_DIVISOR_ID, &div_v_arr[idx][channel]);
@@ -212,9 +207,9 @@ static void add_temp_cluster(ezb_af_ep_desc_t ep_desc, float min_c, float max_c)
 
 void init_zb_ep_board(ezb_af_device_desc_t dev_desc) {
     uint8_t ep = Config.Zigbee.Board.Endpoint;
-    ESP_LOGI(Config.Logging.TagZigbee, "Create EP: Board (EP 0x%X)", ep);
+    LOGI_ZB("Create EP: Board (EP 0x%X)", ep);
     ezb_af_ep_desc_t cluster_list = create_ep(ep, EZB_ZHA_TEMPERATURE_SENSOR_DEVICE_ID);
-    if (!cluster_list) { ESP_LOGE(Config.Logging.TagZigbee, "EP 0x%X create failed", ep); return; }
+    if (!cluster_list) { LOGE_ZB("EP 0x%X create failed", ep); return; }
 
     init_zb_basic_cluster(cluster_list);
     add_temp_cluster(cluster_list, Config.Sensor.Board.MinTemp, Config.Sensor.Board.MaxTemp);
@@ -245,7 +240,7 @@ static void add_diag_clusters(ezb_af_ep_desc_t ep_desc) {
     ezb_err_t r = ezb_zcl_custom_cluster_desc_add_attr(cc, ZB_DIAG_ATTR_FAULT_MASK, EZB_ZCL_ATTR_TYPE_MAP32,
                                                        EZB_ZCL_ATTR_ACCESS_READ_ONLY | EZB_ZCL_ATTR_ACCESS_REPORTING,
                                                        &diag_fault_mask);
-    if (r != EZB_ERR_NONE) ESP_LOGW(Config.Logging.TagZigbee, "diag cluster add_attr ret=%d", (int)r);
+    if (r != EZB_ERR_NONE) LOGW_ZB("diag cluster add_attr ret=%d", (int)r);
     ezb_af_endpoint_add_cluster_desc(ep_desc, cc);
 }
 
@@ -267,25 +262,107 @@ static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, u
 
     if (!found) {
         s_def_missing++;
-        ESP_LOGW(Config.Logging.TagReporting, "%s ep=0x%02X: NO reporting record", name, ep);
+        LOGW_REP("%s ep=0x%02X: NO reporting record", name, ep);
     } else if (r != EZB_ERR_NONE) {
         s_def_missing++;
-        ESP_LOGW(Config.Logging.TagReporting, "%s ep=0x%02X: update failed ret=%d", name, ep, (int)r);
+        LOGW_REP("%s ep=0x%02X: update failed ret=%d", name, ep, (int)r);
     } else {
         s_def_ok++;
-        if (Config.Logging.EnabledReports) ESP_LOGI(Config.Logging.TagReporting, "%s ep=0x%02X: update ret=%d", name, ep, (int)r);
+        if (Config.Logging.EnabledReports) LOGI_REP("%s ep=0x%02X: update ret=%d", name, ep, (int)r);
     }
 }
 
 static int16_t scaled_s16(float v, float mul) { return (int16_t)lroundf(v * mul); }
 
+// ---- The list of reportable attributes (single definition, used by the defaults and by the Default Response off) ----
+enum rec_kind_t { RK_BOARD, RK_DHT_T, RK_DHT_H, RK_DC_V, RK_DC_I, RK_DC_P, RK_FAULT, RK_FAULT_MASK };
+
+struct rec_t {
+    const char *name;
+    uint8_t     ep;
+    uint16_t    cluster;
+    uint16_t    attr;
+    rec_kind_t  kind;
+};
+
+// Calls f(const rec_t &) for every reportable attribute of the device (52 records: board 1 + fault 2 + DHT 2x2 + DC 15x3).
+template <typename F>
+static void for_each_record(F &&f)
+{
+    const uint8_t ep_b = Config.Zigbee.Board.Endpoint;
+    f(rec_t{"board temp", ep_b, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RK_BOARD});
+    for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
+        const uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
+        f(rec_t{"dht temp", ep, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
+                EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RK_DHT_T});
+        f(rec_t{"dht hum", ep, EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
+                EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, RK_DHT_H});
+    }
+    for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
+        for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
+            const uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
+            f(rec_t{"dc V", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, RK_DC_V});
+            f(rec_t{"dc I", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, RK_DC_I});
+            f(rec_t{"dc P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RK_DC_P});
+        }
+    }
+    f(rec_t{"fault", ep_b, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
+            EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, RK_FAULT});
+    f(rec_t{"fault mask", ep_b, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_FAULT_MASK, RK_FAULT_MASK});
+}
+
+// Reporting parameters of a record from Config.Reporting. false = the global or the category switch is off.
+static bool report_params(rec_kind_t kind, uint16_t &min_s, uint16_t &max_s, ezb_zcl_attr_variable_t &delta)
+{
+    const auto &RP = Config.Reporting;
+    delta = {};   // discrete attributes (bool, bitmap32): any change is reported, the delta is not used
+    if (!RP.Enabled) return false;
+    switch (kind) {
+    case RK_BOARD:
+        if (!RP.Board.Enabled) return false;
+        min_s = RP.Board.MinInterval; max_s = RP.Board.MaxInterval;
+        delta.s16 = scaled_s16(RP.Board.ThresholdTemp, 100);
+        return true;
+    case RK_DHT_T:
+        if (!RP.Dht.Enabled) return false;
+        min_s = RP.Dht.MinInterval; max_s = RP.Dht.MaxInterval;
+        delta.s16 = scaled_s16(RP.Dht.ThresholdTemp, 100);
+        return true;
+    case RK_DHT_H:
+        if (!RP.Dht.Enabled) return false;
+        min_s = RP.Dht.MinInterval; max_s = RP.Dht.MaxInterval;
+        delta.u16 = (uint16_t)lroundf(RP.Dht.ThresholdHum * 100);
+        return true;
+    case RK_DC_V:
+    case RK_DC_I:
+    case RK_DC_P:
+        if (!RP.Dc.Enabled) return false;
+        min_s = RP.Dc.MinInterval; max_s = RP.Dc.MaxInterval;
+        // raw units follow the divisors of the endpoints (ZCL_DC_DIV_*)
+        if (kind == RK_DC_V)      delta.s16 = scaled_s16(RP.Dc.ThresholdVolt, ZCL_DC_DIV_V);
+        else if (kind == RK_DC_I) delta.s16 = scaled_s16(RP.Dc.ThresholdCur, ZCL_DC_DIV_I);
+        else                      delta.s16 = scaled_s16(RP.Dc.ThresholdPwr, ZCL_DC_DIV_P);
+        return true;
+    case RK_FAULT:
+    case RK_FAULT_MASK:
+        if (!RP.Fault.Enabled) return false;
+        min_s = RP.Fault.MinInterval; max_s = RP.Fault.MaxInterval;
+        return true;
+    }
+    return false;
+}
+
 // esp-zigbee-lib >= 2.0.5: disable the Default Response for the automatic reports of one attribute
 // (stops the Default Response flood seen in Z2M, PLAN.md 4.3/4.5). Counted for the summary log line.
 static uint16_t s_dis_rsp_ok = 0, s_dis_rsp_missing = 0;
 
-static void disable_default_rsp(uint8_t ep, uint16_t cluster, uint16_t attr)
+static void disable_default_rsp(const rec_t &r)
 {
-    ezb_zcl_reporting_info_t info = ezb_zcl_reporting_info_find(ep, cluster, EZB_ZCL_CLUSTER_SERVER, attr, 0);
+    ezb_zcl_reporting_info_t info = ezb_zcl_reporting_info_find(r.ep, r.cluster, EZB_ZCL_CLUSTER_SERVER, r.attr, 0);
     if (info == EZB_ZCL_INVALID_REPORTING_INFO) { s_dis_rsp_missing++; return; }
     if (ezb_zcl_reporting_info_set_dis_def_rsp(info, true) == EZB_ERR_NONE) s_dis_rsp_ok++;
     else s_dis_rsp_missing++;
@@ -294,57 +371,14 @@ static void disable_default_rsp(uint8_t ep, uint16_t cluster, uint16_t attr)
 // Writes the default reporting of every category enabled in Config.Reporting (global + per category switch).
 static void write_default_reporting()
 {
-    const auto &RP = Config.Reporting;
     s_def_ok = s_def_missing = 0;
-
-    if (RP.Board.Enabled) {
-        ezb_zcl_attr_variable_t dt = { .s16 = scaled_s16(RP.Board.ThresholdTemp, 100) };
-        set_default_report("board temp", Config.Zigbee.Board.Endpoint,
-            EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RP.Board.MinInterval, RP.Board.MaxInterval, &dt);
-    }
-
-    if (RP.Dht.Enabled) {
-        ezb_zcl_attr_variable_t dt = { .s16 = scaled_s16(RP.Dht.ThresholdTemp, 100) };
-        ezb_zcl_attr_variable_t dh = { .u16 = (uint16_t)lroundf(RP.Dht.ThresholdHum * 100) };
-        for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
-            uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
-            set_default_report("dht temp", ep,
-                EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-                EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID, RP.Dht.MinInterval, RP.Dht.MaxInterval, &dt);
-            set_default_report("dht hum", ep,
-                EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
-                EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID, RP.Dht.MinInterval, RP.Dht.MaxInterval, &dh);
+    for_each_record([](const rec_t &r) {
+        uint16_t min_s = 0, max_s = 0;
+        ezb_zcl_attr_variable_t delta;
+        if (report_params(r.kind, min_s, max_s, delta)) {
+            set_default_report(r.name, r.ep, r.cluster, r.attr, min_s, max_s, &delta);
         }
-    }
-
-    if (RP.Dc.Enabled) {
-        // raw units follow the divisors of the endpoints: V and I in mV/mA (1000), power in 10 mW (100)
-        ezb_zcl_attr_variable_t dv = { .s16 = scaled_s16(RP.Dc.ThresholdVolt, 1000) };
-        ezb_zcl_attr_variable_t di = { .s16 = scaled_s16(RP.Dc.ThresholdCur, 1000) };
-        ezb_zcl_attr_variable_t dp = { .s16 = scaled_s16(RP.Dc.ThresholdPwr, 100) };
-        for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
-            for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
-                uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
-                set_default_report("dc V", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &dv);
-                set_default_report("dc I", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &di);
-                set_default_report("dc P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RP.Dc.MinInterval, RP.Dc.MaxInterval, &dp);
-            }
-        }
-    }
-
-    if (RP.Fault.Enabled) {
-        // discrete attributes (bool, bitmap32): any change is reported, the delta is not used
-        ezb_zcl_attr_variable_t none = {};
-        const uint8_t ep = Config.Zigbee.Board.Endpoint;
-        set_default_report("fault", ep, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
-            EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, RP.Fault.MinInterval, RP.Fault.MaxInterval, &none);
-        set_default_report("fault mask", ep, ZB_DIAG_CLUSTER_ID,
-            ZB_DIAG_ATTR_FAULT_MASK, RP.Fault.MinInterval, RP.Fault.MaxInterval, &none);
-    }
+    });
 }
 
 // Default Response off for every reportable attribute (records that do not exist yet are only counted).
@@ -353,27 +387,8 @@ static void write_default_reporting()
 static void init_zb_disable_default_rsp()
 {
     s_dis_rsp_ok = s_dis_rsp_missing = 0;
-    disable_default_rsp(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-                        EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID);
-    disable_default_rsp(Config.Zigbee.Board.Endpoint, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
-                        EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID);
-    disable_default_rsp(Config.Zigbee.Board.Endpoint, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_FAULT_MASK);
-    for (int i = 0; i < Config.Sensor.Dht.Count; i++) {
-        uint8_t ep = Config.Zigbee.Dht.Endpoints[i];
-        disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_TEMPERATURE_MEASUREMENT,
-                            EZB_ZCL_ATTR_TEMPERATURE_MEASUREMENT_MEASURED_VALUE_ID);
-        disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_REL_HUMIDITY_MEASUREMENT,
-                            EZB_ZCL_ATTR_REL_HUMIDITY_MEASUREMENT_MEASURED_VALUE_ID);
-    }
-    for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
-        for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
-            uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
-            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID);
-            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID);
-            disable_default_rsp(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID);
-        }
-    }
-    ESP_LOGI(Config.Logging.TagReporting, "Default Response disabled: %u records ok, %u without record",
+    for_each_record([](const rec_t &r) { disable_default_rsp(r); });
+    LOGI_REP("Default Response disabled: %u records ok, %u without record",
              (unsigned)s_dis_rsp_ok, (unsigned)s_dis_rsp_missing);
 }
 
@@ -384,7 +399,7 @@ static void reporting_defaults_task(void *pv)
     (void)pv;
     const int64_t t0 = esp_timer_get_time();
     write_default_reporting();
-    ESP_LOGI(Config.Logging.TagReporting, "Defaults written: %u ok, %u missing/failed, %lld ms",
+    LOGI_REP("Defaults written: %u ok, %u missing/failed, %lld ms",
              s_def_ok, s_def_missing, (long long)((esp_timer_get_time() - t0) / 1000));
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
@@ -403,11 +418,11 @@ static bool start_reporting_defaults()
     const auto &RP = Config.Reporting;
     if (started) return true;
     if (!RP.Enabled || !(RP.Board.Enabled || RP.Dht.Enabled || RP.Dc.Enabled || RP.Fault.Enabled)) {
-        ESP_LOGI(Config.Logging.TagReporting, "Firmware default reporting is off (config)");
+        LOGI_REP("Firmware default reporting is off (config)");
         return false;
     }
-    if (xTaskCreate(reporting_defaults_task, "Rep_defaults", 4096, NULL, 3, NULL) != pdPASS) {
-        ESP_LOGW(Config.Logging.TagReporting, "defaults task not started, the coordinator has to configure the reporting");
+    if (xTaskCreate(reporting_defaults_task, "Rep_defaults", Config.Tasks.ReportDefaults.Stack, NULL, Config.Tasks.ReportDefaults.Prio, NULL) != pdPASS) {
+        LOGW_REP("defaults task not started, the coordinator has to configure the reporting");
         return false;
     }
     started = true;
@@ -418,12 +433,12 @@ void init_zb_stack() {
 
    init_zb_storage();
 
-    ESP_LOGI(Config.Logging.TagZigbee, "Start ZigBee main thread");
-    xTaskCreate(zigbee_mainloop_task, "Zigbee_main", 16384, NULL, 5, NULL);
+    LOGI_ZB("Start ZigBee main thread");
+    xTaskCreate(zigbee_mainloop_task, "Zigbee_main", Config.Tasks.ZigbeeMain.Stack, NULL, Config.Tasks.ZigbeeMain.Prio, NULL);
 }
 
 void init_zb_storage() {
-    ESP_LOGI(Config.Logging.TagZigbee, "Initializing NVS");
+    LOGI_ZB("Initializing NVS");
     // 1. Initialize Default NVS (Required for PHY/MAC)
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -445,13 +460,13 @@ static void esp_zigbee_zcl_core_action_handler(ezb_zcl_core_action_callback_id_t
         diag_inc(g_diag.zb_default_rsp);
         if (default_rsp->in.status_code != 0) {
             diag_inc(g_diag.zb_default_rsp_err);
-            ESP_LOGW(Config.Logging.TagZigbee, "Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
+            LOGW_ZB("Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
         } else {
-            ESP_LOGD(Config.Logging.TagZigbee, "Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
+            LOGD_ZB("Received ZCL Default Response: status(0x%02x)", default_rsp->in.status_code);
         }
     } break;
     default:
-        ESP_LOGW(Config.Logging.TagZigbee, "ZCL Core Action: ID(0x%04lx)", callback_id);
+        LOGW_ZB("ZCL Core Action: ID(0x%04lx)", callback_id);
         break;
     }
 }
@@ -478,14 +493,14 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
 
     switch (signal_type) {
     case EZB_ZDO_SIGNAL_SKIP_STARTUP:
-        ESP_LOGI(Config.Logging.TagZigbee, "Initialize Zigbee stack");
+        LOGI_ZB("Initialize Zigbee stack");
         ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_INITIALIZATION);
         break;
     case EZB_BDB_SIGNAL_DEVICE_FIRST_START:
     case EZB_BDB_SIGNAL_DEVICE_REBOOT: {
         ezb_bdb_comm_status_t status = *((ezb_bdb_comm_status_t *)ezb_app_signal_get_params(app_signal));
         if (status == EZB_BDB_STATUS_SUCCESS) {
-            ESP_LOGI(Config.Logging.TagZigbee, "Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
+            LOGI_ZB("Device started up in%s factory-reset mode", ezb_bdb_is_factory_new() ? "" : " non");
             health_clear(HM_ZIGBEE, HF_ZB_START_FAILED);
             // Valid attribute values must exist before the stack sends its first reports
             // (otherwise the invalid initial 0x8000/0xFFFF values go out after every start).
@@ -504,13 +519,13 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
                     ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
                 }
             } else {
-                ESP_LOGI(Config.Logging.TagReporting, "Reporting defaults not written (configured device, records kept)");
+                LOGI_REP("Reporting defaults not written (configured device, records kept)");
                 health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED | HF_STARTING);
                 is_zigbee_connected = true;
-                ESP_LOGI(Config.Logging.TagZigbee, "Device reboot");
+                LOGI_ZB("Device reboot");
             }
         } else {
-            ESP_LOGW(Config.Logging.TagZigbee, "%s failed with status(0x%02x), please retry", ezb_app_signal_to_string(signal_type), status);
+            LOGW_ZB("%s failed with status(0x%02x), please retry", ezb_app_signal_to_string(signal_type), status);
             diag_inc(g_diag.zb_start_fail);
             health_set(HM_ZIGBEE, HF_ZB_START_FAILED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_INITIALIZATION, 1000);
@@ -524,10 +539,10 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             ezb_extpanid_t extended_pan_id;
             ezb_nwk_get_extended_panid(&extended_pan_id);
-            ESP_LOGI(Config.Logging.TagZigbee, "Joined network successfully: PAN ID(0x%04hx, EXT: 0x%llx), Channel(%d), Short Address(0x%04hx)",
+            LOGI_ZB("Joined network successfully: PAN ID(0x%04hx, EXT: 0x%llx), Channel(%d), Short Address(0x%04hx)",
                      ezb_nwk_get_panid(), extended_pan_id.u64, ezb_nwk_get_current_channel(), ezb_nwk_get_short_address());
         } else {
-            ESP_LOGW(Config.Logging.TagZigbee, "Failed to join network with status(0x%02x)", status);
+            LOGW_ZB("Failed to join network with status(0x%02x)", status);
             diag_inc(g_diag.zb_join_fail);
             health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
             alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_NETWORK_STEERING, 1000);
@@ -535,26 +550,26 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
     } break;
     case EZB_ZDO_SIGNAL_DEVICE_ANNCE: {
         const ezb_zdo_signal_device_annce_params_t *dev_annce_params = (ezb_zdo_signal_device_annce_params_t *)ezb_app_signal_get_params(app_signal);
-        ESP_LOGI(Config.Logging.TagZigbee, "New device commissioned or rejoined (short: 0x%04hx)", dev_annce_params->short_addr);
+        LOGI_ZB("New device commissioned or rejoined (short: 0x%04hx)", dev_annce_params->short_addr);
     } break;
     case EZB_ZDO_SIGNAL_LEAVE: {
         is_zigbee_connected = false;
         diag_inc(g_diag.zb_leave);
         health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
         const ezb_zdo_signal_leave_params_t *leave_params = (ezb_zdo_signal_leave_params_t *)ezb_app_signal_get_params(app_signal);
-        ESP_LOGI(Config.Logging.TagZigbee, "Left network successfully with type(0x%02x)", leave_params->leave_type);
+        LOGI_ZB("Left network successfully with type(0x%02x)", leave_params->leave_type);
         alarm_timer_schedule(esp_zigbee_alarm_steer_if_factory_new, 0, 2000);
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         uint8_t duration = *(uint8_t *)ezb_app_signal_get_params(app_signal);
         if (duration) {
-            ESP_LOGI(Config.Logging.TagZigbee, "Network(0x%04hx) is open for %d seconds", ezb_nwk_get_panid(), duration);
+            LOGI_ZB("Network(0x%04hx) is open for %d seconds", ezb_nwk_get_panid(), duration);
         } else {
-            ESP_LOGW(Config.Logging.TagZigbee, "Network(0x%04hx) closed, devices joining not allowed.", ezb_nwk_get_panid());
+            LOGW_ZB("Network(0x%04hx) closed, devices joining not allowed.", ezb_nwk_get_panid());
         }
     } break;
     default:
-        ESP_LOGI(Config.Logging.TagZigbee, "Zigbee APP Signal: %s(type: 0x%02x)", ezb_app_signal_to_string(signal_type), signal_type);
+        LOGI_ZB("Zigbee APP Signal: %s(type: 0x%02x)", ezb_app_signal_to_string(signal_type), signal_type);
         break;
     }
     return true;
@@ -575,46 +590,46 @@ void zigbee_mainloop_task(void *pvParameters) {
     esp_zigbee_config_t config = ESP_ZIGBEE_DEFAULT_CONFIG();
     ESP_ERROR_CHECK(esp_zigbee_init(&config));
 
-    ESP_LOGI(Config.Logging.TagZigbee, "ezb_config_memory");
+    LOGI_ZB("ezb_config_memory");
    ezb_mem_config_t mem_config = {};
-    mem_config.aps_bind_table_src_size = 32;
+    mem_config.aps_bind_table_src_size = Config.Zigbee.BindTableSize;
     auto mr = ezb_config_memory(&mem_config);
-    ESP_LOGI(Config.Logging.TagZigbee, "ezb_config_memory ret=%d, heap=%u",
+    LOGI_ZB("ezb_config_memory ret=%d, heap=%u",
              (int)mr, (unsigned)esp_get_free_heap_size());
 
     ESP_ERROR_CHECK(esp_zigbee_setup_commissioning());
 
     ezb_af_device_desc_t dev_desc = ezb_af_create_device_desc();
     
-    ESP_LOGI(Config.Logging.TagZigbee, "Init Zigbee board endpoint");
+    LOGI_ZB("Init Zigbee board endpoint");
     init_zb_ep_board(dev_desc);
 
-    ESP_LOGI(Config.Logging.TagZigbee, "Init Zigbee DHT endpoints");
+    LOGI_ZB("Init Zigbee DHT endpoints");
     init_zb_ep_dht(dev_desc);
 
-    ESP_LOGI(Config.Logging.TagZigbee, "Init Zigbee DC endpoints");
+    LOGI_ZB("Init Zigbee DC endpoints");
     init_zb_ep_dc(dev_desc);
 
-    ESP_LOGI(Config.Logging.TagZigbee, "Registering Endpoints");
+    LOGI_ZB("Registering Endpoints");
     int64_t t0 = esp_timer_get_time();
     auto rr = ezb_af_device_desc_register(dev_desc);
-    ESP_LOGI(Config.Logging.TagZigbee, "register ret=%d, %lld ms, heap=%u",
+    LOGI_ZB("register ret=%d, %lld ms, heap=%u",
             (int)rr, (long long)((esp_timer_get_time() - t0) / 1000), (unsigned)esp_get_free_heap_size());
     if ((int)rr != 0) health_set(HM_ZIGBEE, HF_ZB_REG_FAILED);
 
     nvs_stats_t st;
     if (nvs_get_stats(NULL, &st) == ESP_OK) {
-        ESP_LOGI(Config.Logging.TagZigbee, "NVS used=%u free=%u total=%u ns=%u",
+        LOGI_ZB("NVS used=%u free=%u total=%u ns=%u",
                 (unsigned)st.used_entries, (unsigned)st.free_entries,
                 (unsigned)st.total_entries, (unsigned)st.namespace_count);
     }
 
     ezb_zcl_core_action_handler_register(esp_zigbee_zcl_core_action_handler);
 
-    ESP_LOGI(Config.Logging.TagZigbee, "esp_zigbee_start");
+    LOGI_ZB("esp_zigbee_start");
     ESP_ERROR_CHECK(esp_zigbee_start(false));
 
-    ESP_LOGI(Config.Logging.TagZigbee, "esp_zigbee_launch_mainloop");
+    LOGI_ZB("esp_zigbee_launch_mainloop");
     esp_zigbee_launch_mainloop();
 
     esp_zigbee_deinit();
@@ -633,7 +648,7 @@ void button_task(void *pvParameters) {
                 isPressed = true;
                 pressStartTime = millis(); 
             } else if ((millis() - pressStartTime) > 3000) {
-                ESP_LOGW(Config.Logging.TagZigbee, "Resetting Zigbee to factory and rebooting in 2s.");
+                LOGW_ZB("Resetting Zigbee to factory and rebooting in 2s.");
                 esp_zigbee_lock_acquire(portMAX_DELAY);
                 esp_zigbee_factory_reset();
                 esp_zigbee_lock_release();

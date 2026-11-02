@@ -61,7 +61,7 @@ void health_init() {
     pin_write(Config.Health.GlobalPin, true);
     s_inited = true;
     portEXIT_CRITICAL(&s_lock);
-    ESP_LOGI(Config.Logging.TagHealth, "init: pins global=%d zigbee=%d bus=%d sensor=%d (<0 = off)",
+    LOGI_HEALTH("init: pins global=%d zigbee=%d bus=%d sensor=%d (<0 = off)",
              Config.Health.GlobalPin, Config.Health.ZigbeePin, Config.Health.BusPin, Config.Health.SensorPin);
 }
 
@@ -86,11 +86,11 @@ static void update(health_module_t m, uint32_t set_mask, uint32_t clear_mask) {
     portEXIT_CRITICAL(&s_lock);
 
     if (new_state != old_state) {
-        ESP_LOGW(Config.Logging.TagHealth, "%s: 0x%08X -> 0x%08X%s", module_name(m),
+        LOGW_HEALTH("%s: 0x%08X -> 0x%08X%s", module_name(m),
                  (unsigned)old_state, (unsigned)new_state,
                  new_state == 0 ? " (OK)" : "");
         if (global_changed) {
-            ESP_LOGW(Config.Logging.TagHealth, "global: %s", new_global ? "ERROR" : "OK");
+            LOGW_HEALTH("global: %s", new_global ? "ERROR" : "OK");
         }
     }
 }

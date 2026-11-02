@@ -36,7 +36,7 @@ extern volatile bool is_zigbee_connected;
 {                                                   \
     .device_type = EZB_NWK_DEVICE_TYPE_ROUTER,      \
     .install_code_policy = false,                   \
-    .zczr_config = { .max_children = 10 },          \
+    .zczr_config = { .max_children = Config.Zigbee.MaxChildren }, \
 }
 
 #if CONFIG_SOC_IEEE802154_SUPPORTED

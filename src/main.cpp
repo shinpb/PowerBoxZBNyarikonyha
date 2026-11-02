@@ -35,39 +35,41 @@ static const char *reset_reason_name(esp_reset_reason_t r) {
 
 // ******** ESP-IDF main entry point ********
 extern "C" void app_main() {
-    ESP_LOGI(Config.Logging.TagSetup, "=== BOOT ===");
-    ESP_LOGI(Config.Logging.TagSetup, "app_main()");
+    LOGI_SETUP("=== BOOT ===");
+    LOGI_SETUP("app_main()");
 
     health_init();   // error indication pins, every unit starts in the "starting" state
     {
         esp_reset_reason_t rr = esp_reset_reason();
-        ESP_LOGI(Config.Logging.TagSetup, "Reset reason: %d (%s)", (int)rr, reset_reason_name(rr));
+        LOGI_SETUP("Reset reason: %d (%s)", (int)rr, reset_reason_name(rr));
     }
     heartbeat_start();   // independent status line (heap, health, stacks...), covers the whole boot incl. Zigbee registration
 
     uint32_t flash_size = 0;
     esp_flash_get_physical_size(NULL, &flash_size);
-    ESP_LOGI(Config.Logging.TagSetup, "Flash physical size: %u KB", (unsigned)(flash_size / 1024));
+    LOGI_SETUP("Flash physical size: %u KB", (unsigned)(flash_size / 1024));
 
-    ESP_LOGI(Config.Logging.TagInitSensor, "Init board temperature sensor");
+    LOGI_INIT_SENSOR("Init board temperature sensor");
     init_sensor_board();
 
-    ESP_LOGI(Config.Logging.TagInitSensor, "Init DHT sensors");
+    LOGI_INIT_SENSOR("Init DHT sensors");
     init_sensors_dht();
 
-    ESP_LOGI(Config.Logging.TagInitBus, "Init I2C buses");
+    LOGI_INIT_BUS("Init I2C buses");
     init_native_i2c_buses();
 
-    ESP_LOGI(Config.Logging.TagInitSensor, "Init INA sensors");
+    LOGI_INIT_SENSOR("Init INA sensors");
     init_sensors_ina();
 
     // Bus and sensor units are up (init failures are already flagged individually)
     health_clear(HM_BUS, HF_STARTING);
     health_clear(HM_SENSOR, HF_STARTING);
 
-    ESP_LOGI(Config.Logging.TagInitSensor, "ina_diag()");
-    ina_diag();
-    
+    if (Config.Logging.InaDiag) {
+        LOGI_INIT_SENSOR("ina_diag()");
+        ina_diag();
+    }
+
     if (Config.Zigbee.Disabled) {
         health_clear(HM_ZIGBEE, HF_STARTING);   // no Zigbee unit
     }
@@ -80,17 +82,10 @@ extern "C" void app_main() {
         btn_conf.intr_type = GPIO_INTR_DISABLE;
         gpio_config(&btn_conf);
 
-        ESP_LOGI(Config.Logging.TagZigbee, "Init Zigbee Stack");
+        LOGI_ZB("Init Zigbee Stack");
         init_zb_stack();
 
-        xTaskCreate(
-            button_task, 
-            "Task_Button",  
-            2048,
-            NULL, 
-            1,
-            NULL
-        );
+        xTaskCreate(button_task, "Task_Button", Config.Tasks.Button.Stack, NULL, Config.Tasks.Button.Prio, NULL);
     }
 
     // D7: with Zigbee enabled the measurement tasks are started by the Zigbee
@@ -100,5 +95,5 @@ extern "C" void app_main() {
         start_measurement_tasks();
     }
 
-    ESP_LOGI(Config.Logging.TagSetup, "Setup done");
+    LOGI_SETUP("Setup done");
 }

@@ -13,6 +13,7 @@ const AppConfig Config;
 #include "heartbeat.h"
 #include "sensor_manager.h"
 #include "zigbee_manager.h"
+#include "button.h"
 
 
 // ******** Local Functions ********
@@ -72,20 +73,10 @@ extern "C" void app_main() {
 
     if (Config.Zigbee.Disabled) {
         health_clear(HM_ZIGBEE, HF_STARTING);   // no Zigbee unit
-    }
-    if(!Config.Zigbee.Disabled){
-        gpio_config_t btn_conf = {};
-        btn_conf.pin_bit_mask = (1ULL << Config.Device.ButtonPin);
-        btn_conf.mode = GPIO_MODE_INPUT;
-        btn_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        btn_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        btn_conf.intr_type = GPIO_INTR_DISABLE;
-        gpio_config(&btn_conf);
-
+    } else {
         LOGI_ZB("Init Zigbee Stack");
         init_zb_stack();
-
-        xTaskCreate(button_task, "Task_Button", Config.Tasks.Button.Stack, NULL, Config.Tasks.Button.Prio, NULL);
+        button_init();   // factory-reset button
     }
 
     // D7: with Zigbee enabled the measurement tasks are started by the Zigbee

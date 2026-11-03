@@ -9,6 +9,8 @@
 #include "esp_log.h"
 // STDlib
 #include <stdint.h>
+// Kconfig (project menu: Zigbee channel)
+#include "sdkconfig.h"
 
 // ******** Configuration ********
 #define n_INA 5
@@ -178,6 +180,10 @@ struct AppConfig {
     // Zigbee Stack & Endpoint Mappings
     struct {
         const uint8_t Disabled = 0;
+        // Channels: primary channel and secondary mask come from the project Kconfig (menuconfig)
+        const uint32_t PrimaryChannelMask   = (1U << CONFIG_ZB_EXAMPLE_PRIMARY_CHANNEL);
+        const uint32_t SecondaryChannelMask = CONFIG_ZB_EXAMPLE_SECONDARY_CHANNEL_MASK;
+        const char *StoragePartition = "nvs";  // NVS partition of the Zigbee stack (see partitions.csv)
         const uint16_t RetryInitMs  = 1000;    // BDB initialization retry after a failed start
         const uint16_t RetrySteerMs = 1000;    // steering retry after a failed join
         const uint16_t LeaveSteerMs = 2000;    // steering after a network leave (if factory new)

@@ -1,6 +1,7 @@
 #pragma once
 // Zigbee stack / platform configuration builders (used by zigbee_manager.cpp only).
 // The values come from Config.Zigbee (config.h): channel masks, storage partition, max children.
+#include "sdkconfig.h"   // CONFIG_SOC_IEEE802154_SUPPORTED
 #include "config.h"
 #include "esp_zigbee.h"
 

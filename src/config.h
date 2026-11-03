@@ -27,12 +27,16 @@ struct AppConfig {
         uint8_t HwVersion    = 1;   // HWVersion (0x0003)
         //BOOT_PIN GPIO_NUM_9
         const gpio_num_t ButtonPin = GPIO_NUM_9;
+        const uint16_t ButtonHoldMs = 3000;    // hold time for the Zigbee factory reset
+        const uint16_t ButtonPollMs = 50;      // button polling period
+        const uint16_t ResetRebootDelayMs = 2000; // delay between the factory reset and the restart
+        const uint8_t  ZclVersion = EZB_ZCL_BASIC_ZCL_VERSION_DEFAULT_VALUE;   // ZCL Basic ZCLVersion attribute (library default, 0x08)
     } Device;
 
     // FreeRTOS tasks (stack in bytes, priority). Stack sizes are reviewed in phase 7 (see the heartbeat "stack_free" values).
     struct TaskDef { const uint32_t Stack; const uint8_t Prio; };
     struct {
-        const TaskDef ZigbeeMain      = { 16384, 5 };   // "Zigbee_main"
+        const TaskDef ZigbeeMain      = { 8192,  5 };   // "Zigbee_main"
         const TaskDef ReportDefaults  = { 4096,  3 };   // "Rep_defaults" (one-shot)
         const TaskDef MeasDht         = { 4096,  1 };   // "Task_DHT" (DHT + board temperature)
         const TaskDef MeasDc          = { 4096,  1 };   // "Task_DC"
@@ -49,8 +53,10 @@ struct AppConfig {
     // Serial & Logging
     struct {
         const uint8_t EnabledMeasurements = 0;
-        const uint8_t EnabledReports = 1;
-        const uint8_t InaDiag = 1;           // 1 = run the INA3221 register dump (ina_diag()) at boot; it can delay the Zigbee start
+        const uint8_t ReportUpdates = 0;     // 1 = one log line per successfully written default reporting record (52 lines at a factory-new start)
+        const uint8_t InaDiag = 0;           // 1 = run the INA3221 register dump (ina_diag()) at boot (bring-up aid, ~25 lines, delays the Zigbee start)
+        const uint16_t InaFailLogEvery = 60;     // a failing INA measurement is logged at the first failure and then every N-th cycle
+        const uint16_t SetAttrFailLogEvery = 200; // a failing attribute write is logged at the first failure and then every N-th
         // Topics: every log line belongs to one topic (tag). Use the LOGx_<TOPIC>() macros below (end of file).
         const char* TagSetup = "Setup";
         const char* TagInitSensor = "InitSensor";
@@ -84,7 +90,7 @@ struct AppConfig {
     // them afterwards, and a plain reboot never touches them. Enabled = 0: that category is left entirely to the
     // coordinator (its records stay at the stack default until the coordinator configures them).
     // Keep the values equal to the converter's configure() (D4): temperature 5/60 s 0.5 C, humidity 2 %,
-    // DC 2/30 s 60 mV / 30 mA / 50 mW, fault 0/3600 s.
+    // DC 2/30 s 60 mV / 30 mA / 300 mW, fault 0/3600 s.
     struct {
         const uint8_t Enabled = 1;          // global switch, 0 = no firmware default reporting at all
 
@@ -109,7 +115,7 @@ struct AppConfig {
             const uint16_t MinInterval = 2;
             const float ThresholdVolt = 0.06f;  // V
             const float ThresholdCur = 0.03f;   // A
-            const float ThresholdPwr = 0.05f;   // W
+            const float ThresholdPwr = 0.30f;   // W (~6 % of the reference load's 5 W max; per-channel limits will follow the wiring/shunt choice)
         } Dc;
 
         struct {                            // fault indication: Binary Input (EP 1) + 0xFC11 fault mask
@@ -172,6 +178,9 @@ struct AppConfig {
     // Zigbee Stack & Endpoint Mappings
     struct {
         const uint8_t Disabled = 0;
+        const uint16_t RetryInitMs  = 1000;    // BDB initialization retry after a failed start
+        const uint16_t RetrySteerMs = 1000;    // steering retry after a failed join
+        const uint16_t LeaveSteerMs = 2000;    // steering after a network leave (if factory new)
         const uint8_t MaxChildren = 10;        // router: max. directly connected end devices
         const uint8_t BindTableSize = 32;      // APS binding table source size (the coordinator binds ~20 clusters, default 16 is too small)
         struct {

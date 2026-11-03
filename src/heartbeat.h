@@ -36,6 +36,7 @@ struct diag_counters_t {
     volatile uint32_t zb_join_fail;
     volatile uint32_t zb_leave;               // network leave signals
     volatile uint32_t zb_start_fail;          // BDB start/initialization failures
+    volatile uint32_t rep_stack_free;         // "Rep_defaults" one-shot task: minimum free stack + 1 (bytes), 0 = it has not run
 };
 
 extern diag_counters_t g_diag;

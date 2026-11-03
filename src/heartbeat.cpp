@@ -43,14 +43,14 @@ static int stack_free(const char *name) {
 }
 
 static void print_short() {
-    LOGI_HB("up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d ZB=%d HB=%d",
+    LOGI_HB("up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d ZB=%d BTN=%d HB=%d",
              (unsigned)diag_uptime_s(),
              (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)health_get(HM_ZIGBEE), (unsigned)health_get(HM_BUS), (unsigned)health_get(HM_SENSOR),
              (unsigned)health_get_global(),
-             stack_free("Task_DHT"), stack_free("Task_DC"), stack_free("Zigbee_main"),
+             stack_free("Task_DHT"), stack_free("Task_DC"), stack_free("Zigbee_main"), stack_free("Task_Button"),
              (int)uxTaskGetStackHighWaterMark(NULL));
 }
 
@@ -96,6 +96,8 @@ static void print_long() {
              (unsigned)g_diag.zb_join_ok, (unsigned)g_diag.zb_join_fail,
              (unsigned)g_diag.zb_leave, (unsigned)g_diag.zb_start_fail,
              have_nvs ? (unsigned)st.used_entries : 0u, have_nvs ? (unsigned)st.free_entries : 0u);
+    // the one-shot reporting defaults task is gone by now: its last measured minimum (-1 = it has not run in this boot)
+    LOGI_HB("stack_free of the one-shot Rep_defaults task: %d", g_diag.rep_stack_free ? (int)(g_diag.rep_stack_free - 1) : -1);
 }
 
 static void heartbeat_task(void *pv) {

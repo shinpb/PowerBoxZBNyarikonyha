@@ -262,7 +262,7 @@ const definition = {
                         attribute: {ID: ATTR_DC_POWER, type: TYPE_INT16},
                         minimumReportInterval: 2,
                         maximumReportInterval: 30,
-                        reportableChange: 5, // 50 mW
+                        reportableChange: 30, // 300 mW (raw unit 10 mW)
                     },
                 ]);
             } catch (error) {

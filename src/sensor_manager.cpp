@@ -30,7 +30,7 @@
     auto st_ = ezb_zcl_set_attr_value((ep), (cl), EZB_ZCL_CLUSTER_SERVER, (at),   \
                                       EZB_ZCL_STD_MANUF_CODE, (val), false);      \
     static uint32_t n_ = 0;                                                       \
-    if ((int)st_ != 0 && (n_++ % 200) == 0)                                       \
+    if ((int)st_ != 0 && (n_++ % Config.Logging.SetAttrFailLogEvery) == 0)                                       \
         LOGW_ZB("set_attr ep=0x%02X cl=0x%04X attr=0x%04X st=%d", \
                  (unsigned)(ep), (unsigned)(cl), (unsigned)(at), (int)st_);       \
 } while (0)
@@ -428,7 +428,7 @@ static void dc_cycle(bool pre_start) {
                 } else { // Measurement failed (the attribute keeps its last value)
                     ina_failed = true;
                     // log the first failure of a streak and then every 60th cycle only
-                    if (s_ina_fail[idx] == 0 || (s_ina_fail[idx] % 60) == 0) {
+                    if (s_ina_fail[idx] == 0 || (s_ina_fail[idx] % Config.Logging.InaFailLogEvery) == 0) {
                         LOGW_MEAS("Measure DC %d/%d failed: %d, %d",
                           idx, channel,
                           err_v, err_i );

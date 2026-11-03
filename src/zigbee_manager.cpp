@@ -80,9 +80,9 @@ static void zcl_str16(uint8_t buf[17], const char *src) {
 void init_zb_basic_cluster(ezb_af_ep_desc_t cluster_list) {
     LOGI_ZB("init_zb_basic_cluster");
     // ZCLVersion and PowerSource are mandatory attributes: the stack creates them from this config
-    // (add_attr on them is not needed). zcl_version 8 = the library default read by Z2M so far.
+    // (add_attr on them is not needed). ZCLVersion: Config.Device.ZclVersion.
     ezb_zcl_basic_cluster_server_config_t basic_cfg = {};
-    basic_cfg.zcl_version  = 8;
+    basic_cfg.zcl_version  = Config.Device.ZclVersion;
     basic_cfg.power_source = Config.Device.PowerSource;
     ezb_zcl_cluster_desc_t basic_desc = ezb_zcl_basic_create_cluster_desc(&basic_cfg, EZB_ZCL_CLUSTER_SERVER);
 
@@ -268,7 +268,7 @@ static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, u
         LOGW_REP("%s ep=0x%02X: update failed ret=%d", name, ep, (int)r);
     } else {
         s_def_ok++;
-        if (Config.Logging.EnabledReports) LOGI_REP("%s ep=0x%02X: update ret=%d", name, ep, (int)r);
+        if (Config.Logging.ReportUpdates) LOGI_REP("%s ep=0x%02X: update ret=%d", name, ep, (int)r);
     }
 }
 
@@ -399,8 +399,9 @@ static void reporting_defaults_task(void *pv)
     (void)pv;
     const int64_t t0 = esp_timer_get_time();
     write_default_reporting();
-    LOGI_REP("Defaults written: %u ok, %u missing/failed, %lld ms",
-             s_def_ok, s_def_missing, (long long)((esp_timer_get_time() - t0) / 1000));
+    g_diag.rep_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL) + 1;   // +1: 0 = the task has not run
+    LOGI_REP("Defaults written: %u ok, %u missing/failed, %lld ms, stack_free=%u",
+             s_def_ok, s_def_missing, (long long)((esp_timer_get_time() - t0) / 1000), (unsigned)(g_diag.rep_stack_free - 1));
 
     esp_zigbee_lock_acquire(portMAX_DELAY);
     init_zb_disable_default_rsp();   // again, after the updates (an update may reset the flag; harmless otherwise)
@@ -408,6 +409,7 @@ static void reporting_defaults_task(void *pv)
         (void)ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
     }
     esp_zigbee_lock_release();
+    g_diag.rep_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL) + 1;
     vTaskDelete(NULL);
 }
 
@@ -528,7 +530,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             LOGW_ZB("%s failed with status(0x%02x), please retry", ezb_app_signal_to_string(signal_type), status);
             diag_inc(g_diag.zb_start_fail);
             health_set(HM_ZIGBEE, HF_ZB_START_FAILED);
-            alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_INITIALIZATION, 1000);
+            alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_INITIALIZATION, Config.Zigbee.RetryInitMs);
         }
     } break;
     case EZB_BDB_SIGNAL_STEERING: {
@@ -545,7 +547,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
             LOGW_ZB("Failed to join network with status(0x%02x)", status);
             diag_inc(g_diag.zb_join_fail);
             health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
-            alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_NETWORK_STEERING, 1000);
+            alarm_timer_schedule(esp_zigbee_alarm_bdb_commissioning, EZB_BDB_MODE_NETWORK_STEERING, Config.Zigbee.RetrySteerMs);
         }
     } break;
     case EZB_ZDO_SIGNAL_DEVICE_ANNCE: {
@@ -558,7 +560,7 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
         const ezb_zdo_signal_leave_params_t *leave_params = (ezb_zdo_signal_leave_params_t *)ezb_app_signal_get_params(app_signal);
         LOGI_ZB("Left network successfully with type(0x%02x)", leave_params->leave_type);
-        alarm_timer_schedule(esp_zigbee_alarm_steer_if_factory_new, 0, 2000);
+        alarm_timer_schedule(esp_zigbee_alarm_steer_if_factory_new, 0, Config.Zigbee.LeaveSteerMs);
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         uint8_t duration = *(uint8_t *)ezb_app_signal_get_params(app_signal);
@@ -647,19 +649,19 @@ void button_task(void *pvParameters) {
             if (!isPressed) {
                 isPressed = true;
                 pressStartTime = millis(); 
-            } else if ((millis() - pressStartTime) > 3000) {
-                LOGW_ZB("Resetting Zigbee to factory and rebooting in 2s.");
+            } else if ((millis() - pressStartTime) > Config.Device.ButtonHoldMs) {
+                LOGW_ZB("Resetting Zigbee to factory and rebooting in %u ms.", (unsigned)Config.Device.ResetRebootDelayMs);
                 esp_zigbee_lock_acquire(portMAX_DELAY);
                 esp_zigbee_factory_reset();
                 esp_zigbee_lock_release();
-                vTaskDelay(pdMS_TO_TICKS(2000));
+                vTaskDelay(pdMS_TO_TICKS(Config.Device.ResetRebootDelayMs));
                 esp_restart();
             }
         } else {
             isPressed = false;
         }
         
-        vTaskDelay(pdMS_TO_TICKS(50)); 
+        vTaskDelay(pdMS_TO_TICKS(Config.Device.ButtonPollMs));
     }
 }
 

@@ -56,6 +56,11 @@ struct AppConfig {
         const uint8_t ReportUpdates = 0;     // 1 = one log line per successfully written default reporting record (52 lines at a factory-new start)
         const uint8_t InaDiag = 0;           // 1 = run the INA3221 register dump (ina_diag()) at boot (bring-up aid, ~25 lines, delays the Zigbee start)
         const uint16_t InaFailLogEvery = 60;     // a failing INA measurement is logged at the first failure and then every N-th cycle
+        const uint16_t DhtFailLogEvery = 20;      // a failing DHT read is logged at the first failure of a streak and then every N-th
+        // Library log levels (the firmware logs the failures itself, the libraries repeat them per retry): ESP_LOG_NONE = silent,
+        // ESP_LOG_WARN = library default behaviour (e.g. ~12 lines per failed I2C access).
+        const esp_log_level_t I2cdevLibLevel = ESP_LOG_NONE;   // tag "i2cdev" (esp-idf-lib)
+        const esp_log_level_t DhtLibLevel    = ESP_LOG_NONE;   // tag "dht" (esp-idf-lib)
         const uint16_t SetAttrFailLogEvery = 200; // a failing attribute write is logged at the first failure and then every N-th
         // Topics: every log line belongs to one topic (tag). Use the LOGx_<TOPIC>() macros below (end of file).
         const char* TagSetup = "Setup";

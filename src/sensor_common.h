@@ -7,7 +7,7 @@
 #include "config.h"
 
 // Saturating counter increment (consecutive failures).
-static inline uint8_t sat_inc(uint8_t v) { return v < 255 ? v + 1 : v; }
+static inline uint32_t sat_inc(uint32_t v) { return v < UINT32_MAX ? v + 1 : v; }
 
 // Sensor init failures do not abort the firmware (the Zigbee side keeps running);
 // Config.Health.AbortOnInitFail = 1 restores the old abort for development.

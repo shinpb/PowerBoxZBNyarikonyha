@@ -36,6 +36,8 @@ static const char *reset_reason_name(esp_reset_reason_t r) {
 
 // ******** ESP-IDF main entry point ********
 extern "C" void app_main() {
+    esp_log_level_set("i2cdev", Config.Logging.I2cdevLibLevel);   // library noise (the firmware logs the failures itself)
+    esp_log_level_set("dht", Config.Logging.DhtLibLevel);
     LOGI_SETUP("=== BOOT ===");
     LOGI_SETUP("app_main()");
 

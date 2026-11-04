@@ -15,7 +15,7 @@ static temperature_sensor_handle_t board_tsens = NULL;
 
 // ---- Fault handling state (see health.h) ----
 // Consecutive failed cycles; the error flag is set at Config.Health.FailThreshold.
-static uint8_t s_board_fail = 0;
+static uint32_t s_board_fail = 0;
 // "invalid value already written to the Zigbee attributes" flags (4.7): the invalid value is written once
 // per failure streak (retried until the write is allowed, i.e. after the join); a good measurement clears them.
 static bool    s_board_inv = false;

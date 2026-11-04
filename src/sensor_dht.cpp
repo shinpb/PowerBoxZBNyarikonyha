@@ -13,7 +13,7 @@
 #include "config.h"
 
 #ifndef DUMMY_SENSOR_MODE
-static uint8_t s_dht_fail[n_DHT] = {0};
+static uint32_t s_dht_fail[n_DHT] = {0};
 static bool    s_dht_inv[n_DHT] = {false};   // "invalid value already written" (once per failure streak, 4.7)
 #endif
 
@@ -69,8 +69,12 @@ void dht_cycle(bool pre_start) {
                         s_dht_inv[idx] = zb_write_dht(Config.Zigbee.Dht.Endpoints[idx], ZCL_INVALID_TEMP, ZCL_INVALID_HUM, pre_start);
                     }
                 }
-                LOGW_MEAS("DHT %d read failed: %s (ok=%u fail=%u)",
-                         idx, esp_err_to_name(dht_err), (unsigned)g_diag.dht_ok[idx], (unsigned)g_diag.dht_fail[idx]);
+                // log the first failure of a streak and then every N-th one only
+                if (s_dht_fail[idx] == 1 || (s_dht_fail[idx] % Config.Logging.DhtFailLogEvery) == 0) {
+                    LOGW_MEAS("DHT %d read failed: %s (streak=%u ok=%u fail=%u)",
+                             idx, esp_err_to_name(dht_err), (unsigned)s_dht_fail[idx],
+                             (unsigned)g_diag.dht_ok[idx], (unsigned)g_diag.dht_fail[idx]);
+                }
             }
 #endif
         }

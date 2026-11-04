@@ -21,7 +21,7 @@ static bool    s_ina_inv[n_INA] = {false};
 static bool    s_i2c_ready = false;
 static bool    s_ina_desc_ok[n_INA] = {false};   // ina3221_init_desc() done (must run only once: it creates a mutex)
 static bool    s_ina_ok[n_INA] = {false};        // INA fully initialized (readable)
-static uint8_t s_ina_fail[n_INA] = {0};
+static uint32_t s_ina_fail[n_INA] = {0};
 static TickType_t s_ina_retry_tick[n_INA] = {0};
 #endif
 

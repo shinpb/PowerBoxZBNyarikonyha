@@ -83,6 +83,7 @@ struct AppConfig {
         const int BusPin    = -1;
         const int SensorPin = -1;
         const uint8_t  FailThreshold   = 3;    // consecutive failed reads before the error flag is set
+        const uint8_t  RecoverThreshold = 3;   // consecutive good reads before the error flag is cleared (hysteresis; while recovering the value stays invalid)
         const uint16_t RetryS          = 30;   // re-init period of a failed INA module (s)
         const uint8_t  AbortOnInitFail = 0;    // 1 = development: abort on a sensor init failure (old behavior)
         const uint16_t HeartbeatS      = 30;   // heartbeat log period (s), 0 = off (see heartbeat.h)

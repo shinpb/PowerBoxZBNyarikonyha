@@ -22,6 +22,7 @@ static bool    s_i2c_ready = false;
 static bool    s_ina_desc_ok[n_INA] = {false};   // ina3221_init_desc() done (must run only once: it creates a mutex)
 static bool    s_ina_ok[n_INA] = {false};        // INA fully initialized (readable)
 static uint32_t s_ina_fail[n_INA] = {0};
+static uint32_t s_ina_good[n_INA] = {0};   // consecutive good cycles while the error flag is set (recovery hysteresis)
 static TickType_t s_ina_retry_tick[n_INA] = {0};
 #endif
 
@@ -135,7 +136,11 @@ void ina_cycle(bool pre_start) {
                     diag_inc(g_diag.ina_reinit_try);
                     esp_err_t e = ina_init_one(idx);
                     LOGI_INIT_SENSOR("INA %d re-init: %s", idx, esp_err_to_name(e));
-                    if (e == ESP_OK) { s_ina_ok[idx] = true; s_ina_fail[idx] = 0; diag_inc(g_diag.ina_reinit_ok); }
+                    if (e == ESP_OK) {
+                        // back online, but the error flag stays until RecoverThreshold good cycles (any failure = offline again)
+                        s_ina_ok[idx] = true; s_ina_fail[idx] = Config.Health.FailThreshold; s_ina_good[idx] = 0;
+                        diag_inc(g_diag.ina_reinit_ok);
+                    }
                 }
                 if (!s_ina_ok[idx]) {
                     // offline module: report the ZCL invalid values (once per outage)
@@ -150,6 +155,9 @@ void ina_cycle(bool pre_start) {
                 }
             }
             bool ina_failed = false;
+            const bool publish = (s_ina_fail[idx] < Config.Health.FailThreshold);   // false while recovering
+#else
+            const bool publish = true;
 #endif
             for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
 #ifndef DUMMY_SENSOR_MODE
@@ -192,7 +200,7 @@ void ina_cycle(bool pre_start) {
                     int16_t measured_i = (int16_t)(current_mA);
                     int16_t measured_p = (int16_t)(power_mW / 10.0); //cW because of int16
 
-                    zb_write_dc(Config.Zigbee.Ina.Endpoints[idx][channel], measured_v, measured_i, measured_p, pre_start);
+                    if (publish) zb_write_dc(Config.Zigbee.Ina.Endpoints[idx][channel], measured_v, measured_i, measured_p, pre_start);
 #ifndef DUMMY_SENSOR_MODE
                 } else { // Measurement failed (the attribute keeps its last value)
                     ina_failed = true;
@@ -207,9 +215,21 @@ void ina_cycle(bool pre_start) {
 #endif
             }
 #ifndef DUMMY_SENSOR_MODE
-            s_ina_fail[idx] = ina_failed ? sat_inc(s_ina_fail[idx]) : 0;
-            if (!ina_failed) { diag_mark(g_diag.ina_last_ok_s[idx]); s_ina_inv[idx] = false; }
-            if (s_ina_fail[idx] >= Config.Health.FailThreshold) {
+            if (ina_failed) {
+                s_ina_fail[idx] = sat_inc(s_ina_fail[idx]);
+                s_ina_good[idx] = 0;
+            } else {
+                diag_mark(g_diag.ina_last_ok_s[idx]);
+                if (s_ina_fail[idx] >= Config.Health.FailThreshold) {   // recovering
+                    s_ina_good[idx] = sat_inc(s_ina_good[idx]);
+                    if (s_ina_good[idx] >= Config.Health.RecoverThreshold) {
+                        s_ina_fail[idx] = 0; s_ina_good[idx] = 0; s_ina_inv[idx] = false;
+                    }
+                } else {
+                    s_ina_fail[idx] = 0;
+                }
+            }
+            if (ina_failed && s_ina_fail[idx] >= Config.Health.FailThreshold) {
                 // Offline: stop polling (every failed access costs ~1-2 s and slows every other module),
                 // probe it again with a re-init every Config.Health.RetryS seconds.
                 s_ina_ok[idx] = false;

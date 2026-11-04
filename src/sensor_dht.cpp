@@ -14,6 +14,7 @@
 
 #ifndef DUMMY_SENSOR_MODE
 static uint32_t s_dht_fail[n_DHT] = {0};
+static uint32_t s_dht_good[n_DHT] = {0};   // consecutive good reads while the error flag is set (recovery hysteresis)
 static bool    s_dht_inv[n_DHT] = {false};   // "invalid value already written" (once per failure streak, 4.7)
 #endif
 
@@ -27,6 +28,7 @@ void init_sensors_dht() {
 
 void dht_cycle(bool pre_start) {
         for (int idx = 0; idx < Config.Sensor.Dht.Count; idx++) {
+            bool publish = true;   // false while recovering (fault flag set, not enough good reads yet)
 #ifndef DUMMY_SENSOR_MODE
             float temperature = 0.0;
             float humidity = 0.0;
@@ -34,21 +36,31 @@ void dht_cycle(bool pre_start) {
             if (dht_err == ESP_OK) {
                 diag_inc(g_diag.dht_ok[idx]);
                 diag_mark(g_diag.dht_last_ok_s[idx]);
-                if (s_dht_fail[idx] > 0) {
-                    // WARN on purpose (PLAN.md 4.6a): as INFO this line was intermittently missing from the
-                    // serial log (also in a raw terminal capture); the failure line is WARN as well.
-                    LOGW_MEAS("DHT %d recovered after %u failed reads",
-                             idx, (unsigned)s_dht_fail[idx]);
+                if (s_dht_fail[idx] >= Config.Health.FailThreshold) {
+                    // fault active: the flag is cleared (and values are published again) after RecoverThreshold good reads in a row
+                    s_dht_good[idx] = sat_inc(s_dht_good[idx]);
+                    if (s_dht_good[idx] >= Config.Health.RecoverThreshold) {
+                        // WARN on purpose (PLAN.md 4.6a): as INFO this line was intermittently missing from the
+                        // serial log (also in a raw terminal capture); the failure line is WARN as well.
+                        LOGW_MEAS("DHT %d recovered after %u failed reads", idx, (unsigned)s_dht_fail[idx]);
+                        health_clear(HM_SENSOR, HF_SENS_DHT(idx));
+                        s_dht_fail[idx] = 0;
+                        s_dht_good[idx] = 0;
+                        s_dht_inv[idx] = false;
+                    } else {
+                        publish = false;
+                    }
+                } else {
+                    if (s_dht_fail[idx] > 0) LOGW_MEAS("DHT %d recovered after %u failed reads", idx, (unsigned)s_dht_fail[idx]);
+                    s_dht_fail[idx] = 0;
                 }
-                if (s_dht_fail[idx] >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_DHT(idx));
-                s_dht_fail[idx] = 0;
-                s_dht_inv[idx] = false;
 #else
             static float tick_dht = 0.0;
             tick_dht += 0.1;
             float temperature = 22.0 + (sin(tick_dht * 0.5 + idx) * 1.5);
             float humidity = 45.0 + (cos(tick_dht * 0.5 + idx) * 5.0);
 #endif
+                if (publish) {
                 if(Config.Logging.EnabledMeasurements) {
                   LOGI_MEAS("DHT %d: %.2f°C %.0f%%", idx, temperature, humidity);
                 }
@@ -58,9 +70,11 @@ void dht_cycle(bool pre_start) {
                 uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
 
                 zb_write_dht(ep, measured_temp, measured_hum, pre_start);
+                }
 #ifndef DUMMY_SENSOR_MODE
             } else {
                 diag_inc(g_diag.dht_fail[idx]);
+                s_dht_good[idx] = 0;
                 s_dht_fail[idx] = sat_inc(s_dht_fail[idx]);
                 if (s_dht_fail[idx] >= Config.Health.FailThreshold) {
                     health_set(HM_SENSOR, HF_SENS_DHT(idx));

@@ -16,6 +16,7 @@ static temperature_sensor_handle_t board_tsens = NULL;
 // ---- Fault handling state (see health.h) ----
 // Consecutive failed cycles; the error flag is set at Config.Health.FailThreshold.
 static uint32_t s_board_fail = 0;
+static uint32_t s_board_good = 0;   // consecutive good reads while the error flag is set (recovery hysteresis)
 // "invalid value already written to the Zigbee attributes" flags (4.7): the invalid value is written once
 // per failure streak (retried until the write is allowed, i.e. after the join); a good measurement clears them.
 static bool    s_board_inv = false;
@@ -39,16 +40,31 @@ void init_sensor_board() {
 void board_cycle(bool pre_start) {
         float board_c = 0.0f;
         if (board_tsens != NULL && temperature_sensor_get_celsius(board_tsens, &board_c) == ESP_OK) {
-            if (s_board_fail >= Config.Health.FailThreshold) health_clear(HM_SENSOR, HF_SENS_BOARD);
-            s_board_fail = 0;
             diag_mark(g_diag.board_last_ok_s);
-            if (Config.Logging.EnabledMeasurements) {
-                LOGI_MEAS("Board: %.2f°C", board_c);
+            bool publish = true;
+            if (s_board_fail >= Config.Health.FailThreshold) {
+                // fault active: cleared (and the value published again) after RecoverThreshold good reads in a row
+                s_board_good = sat_inc(s_board_good);
+                if (s_board_good >= Config.Health.RecoverThreshold) {
+                    health_clear(HM_SENSOR, HF_SENS_BOARD);
+                    s_board_fail = 0;
+                    s_board_good = 0;
+                    s_board_inv = false;
+                } else {
+                    publish = false;
+                }
+            } else {
+                s_board_fail = 0;
             }
-            int16_t measured_board = (int16_t)lroundf(board_c * 100.0f);
-            s_board_inv = false;
-            zb_write_board(measured_board, pre_start);
+            if (publish) {
+                if (Config.Logging.EnabledMeasurements) {
+                    LOGI_MEAS("Board: %.2f°C", board_c);
+                }
+                int16_t measured_board = (int16_t)lroundf(board_c * 100.0f);
+                zb_write_board(measured_board, pre_start);
+            }
         } else {
+            s_board_good = 0;
             if (board_tsens != NULL) {   // read error (a NULL handle = init failure, already flagged, counter preset)
                 s_board_fail = sat_inc(s_board_fail);
                 diag_inc(g_diag.board_fail);

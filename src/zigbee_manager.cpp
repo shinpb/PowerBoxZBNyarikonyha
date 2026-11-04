@@ -28,6 +28,18 @@ static void init_zb_storage();
 // Shared variable single instance
 volatile bool is_zigbee_connected = false;
 
+void zb_factory_reset_and_restart() {
+    static volatile bool s_busy = false;   // the button and a leave signal may both ask for it
+    if (s_busy) return;
+    s_busy = true;
+    LOGW_ZB("Resetting Zigbee to factory and rebooting in %u ms.", (unsigned)Config.Device.ResetRebootDelayMs);
+    esp_zigbee_lock_acquire(portMAX_DELAY);
+    esp_zigbee_factory_reset();
+    esp_zigbee_lock_release();
+    vTaskDelay(pdMS_TO_TICKS(Config.Device.ResetRebootDelayMs));
+    esp_restart();
+}
+
 void init_zb_stack() {
 
    init_zb_storage();
@@ -77,13 +89,30 @@ static void esp_zigbee_alarm_bdb_commissioning(alarm_timer_arg_t arg)
     esp_zigbee_lock_release();
 }
 
-static void esp_zigbee_alarm_steer_if_factory_new(alarm_timer_arg_t arg)
+// Leave WITHOUT rejoin (removed from the network, e.g. in Z2M): same as the button, factory reset + restart, so the
+// normal factory-new start runs (firmware reporting defaults, Default Response off, steering) and the device pairs again.
+static void esp_zigbee_alarm_leave_reset(alarm_timer_arg_t arg)
+{
+    zb_factory_reset_and_restart();
+}
+
+// Leave WITH rejoin: the stack rejoins by itself; the "joined" flag comes back when the stack reports the join.
+static volatile bool s_rejoin_polling = false;
+static void esp_zigbee_alarm_rejoin_check(alarm_timer_arg_t arg)
 {
     esp_zigbee_lock_acquire(portMAX_DELAY);
-    if (ezb_bdb_is_factory_new()) {
-        (void)ezb_bdb_start_top_level_commissioning(EZB_BDB_MODE_NETWORK_STEERING);
-    }
+    const bool joined = ezb_bdb_dev_joined();
+    const uint16_t panid = joined ? ezb_nwk_get_panid() : 0;
+    const uint8_t  chan  = joined ? ezb_nwk_get_current_channel() : 0;
     esp_zigbee_lock_release();
+    if (joined) {
+        s_rejoin_polling = false;
+        is_zigbee_connected = true;
+        health_clear(HM_ZIGBEE, HF_ZB_NOT_JOINED);
+        LOGI_ZB("Rejoined the network: PAN ID(0x%04hx), Channel(%d)", panid, (int)chan);
+    } else {
+        alarm_timer_schedule(esp_zigbee_alarm_rejoin_check, 0, Config.Zigbee.RejoinPollMs);
+    }
 }
 
 static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
@@ -157,7 +186,14 @@ static bool esp_zigbee_app_signal_handler(const ezb_app_signal_t *app_signal)
         health_set(HM_ZIGBEE, HF_ZB_NOT_JOINED);
         const ezb_zdo_signal_leave_params_t *leave_params = (ezb_zdo_signal_leave_params_t *)ezb_app_signal_get_params(app_signal);
         LOGI_ZB("Left network successfully with type(0x%02x)", leave_params->leave_type);
-        alarm_timer_schedule(esp_zigbee_alarm_steer_if_factory_new, 0, Config.Zigbee.LeaveSteerMs);
+        if (leave_params->leave_type == EZB_ZDO_LEAVE_TYPE_REJOIN) {
+            if (!s_rejoin_polling) {
+                s_rejoin_polling = true;
+                alarm_timer_schedule(esp_zigbee_alarm_rejoin_check, 0, Config.Zigbee.RejoinPollMs);
+            }
+        } else {
+            alarm_timer_schedule(esp_zigbee_alarm_leave_reset, 0, Config.Zigbee.LeaveResetMs);
+        }
     } break;
     case EZB_NWK_SIGNAL_PERMIT_JOIN_STATUS: {
         uint8_t duration = *(uint8_t *)ezb_app_signal_get_params(app_signal);

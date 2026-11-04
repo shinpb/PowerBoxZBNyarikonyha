@@ -191,7 +191,8 @@ struct AppConfig {
         const char *StoragePartition = "nvs";  // NVS partition of the Zigbee stack (see partitions.csv)
         const uint16_t RetryInitMs  = 1000;    // BDB initialization retry after a failed start
         const uint16_t RetrySteerMs = 1000;    // steering retry after a failed join
-        const uint16_t LeaveSteerMs = 2000;    // steering after a network leave (if factory new)
+        const uint16_t LeaveResetMs = 2000;    // after a leave WITHOUT rejoin (e.g. removed in Z2M): delay before the factory reset + restart (same as the button)
+        const uint16_t RejoinPollMs = 1000;    // after a leave WITH rejoin: period of the "joined again?" check
         const uint8_t MaxChildren = 10;        // router: max. directly connected end devices
         const uint8_t BindTableSize = 32;      // APS binding table source size (the coordinator binds ~20 clusters, default 16 is too small)
         struct {

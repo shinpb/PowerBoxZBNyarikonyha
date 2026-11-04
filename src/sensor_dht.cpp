@@ -65,8 +65,8 @@ void dht_cycle(bool pre_start) {
                   LOGI_MEAS("DHT %d: %.2f°C %.0f%%", idx, temperature, humidity);
                 }
 
-                int16_t measured_temp = (int16_t)(temperature * 100);
-                uint16_t measured_hum = (uint16_t)(humidity * 100);
+                int16_t measured_temp = (int16_t)lroundf(temperature * 100.0f);
+                uint16_t measured_hum = (uint16_t)lroundf(humidity * 100.0f);
                 uint8_t ep = Config.Zigbee.Dht.Endpoints[idx];
 
                 zb_write_dht(ep, measured_temp, measured_hum, pre_start);

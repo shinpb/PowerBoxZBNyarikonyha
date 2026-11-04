@@ -196,9 +196,9 @@ void ina_cycle(bool pre_start) {
                         LOGI_MEAS("DC %d/%d: %.4fV %7.1fmA", idx, channel, voltage_V, current_mA);
                     }
 
-                    int16_t measured_v = (int16_t)(voltage_V * 1000.0f);
-                    int16_t measured_i = (int16_t)(current_mA);
-                    int16_t measured_p = (int16_t)(power_mW / 10.0); //cW because of int16
+                    int16_t measured_v = (int16_t)lroundf(voltage_V * 1000.0f);
+                    int16_t measured_i = (int16_t)lroundf(current_mA);
+                    int16_t measured_p = (int16_t)lroundf(power_mW / 10.0f); // cW because of int16 (max 327.67 W: 12.6 A at 26 V; the planned 12..15 V / <10 A fits)
 
                     if (publish) zb_write_dc(Config.Zigbee.Ina.Endpoints[idx][channel], measured_v, measured_i, measured_p, pre_start);
 #ifndef DUMMY_SENSOR_MODE

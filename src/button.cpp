@@ -5,10 +5,9 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-// External Libraries
-#include "esp_zigbee.h"
 // Internal components
 #include "button.h"
+#include "zigbee_manager.h"
 #include "config.h"
 
 static uint64_t millis();
@@ -23,12 +22,7 @@ static void button_task(void *pvParameters) {
                 isPressed = true;
                 pressStartTime = millis(); 
             } else if ((millis() - pressStartTime) > Config.Device.ButtonHoldMs) {
-                LOGW_ZB("Resetting Zigbee to factory and rebooting in %u ms.", (unsigned)Config.Device.ResetRebootDelayMs);
-                esp_zigbee_lock_acquire(portMAX_DELAY);
-                esp_zigbee_factory_reset();
-                esp_zigbee_lock_release();
-                vTaskDelay(pdMS_TO_TICKS(Config.Device.ResetRebootDelayMs));
-                esp_restart();
+                zb_factory_reset_and_restart();   // does not return
             }
         } else {
             isPressed = false;

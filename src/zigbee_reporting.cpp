@@ -165,6 +165,8 @@ void zb_disable_default_rsp()
 
 // Factory-new start: write the firmware defaults first, then start the steering (so the coordinator's configure
 // after the join always comes AFTER the defaults and overwrites them, never the other way round).
+static volatile bool s_defaults_done = false;   // the task has finished (and started the steering)
+
 static void reporting_defaults_task(void *pv)
 {
     (void)pv;
@@ -181,6 +183,7 @@ static void reporting_defaults_task(void *pv)
     }
     esp_zigbee_lock_release();
     g_diag.rep_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL) + 1;
+    s_defaults_done = true;
     vTaskDelete(NULL);
 }
 
@@ -189,7 +192,7 @@ bool zb_start_reporting_defaults()
 {
     static bool started = false;
     const auto &RP = Config.Reporting;
-    if (started) return true;
+    if (started) return !s_defaults_done;   // still running: it starts the steering; already done: the caller must
     if (!RP.Enabled || !(RP.Board.Enabled || RP.Dht.Enabled || RP.Dc.Enabled || RP.Fault.Enabled)) {
         LOGI_REP("Firmware default reporting is off (config)");
         return false;

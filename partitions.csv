@@ -1,7 +1,8 @@
 # Name,       Type, SubType, Offset,   Size,     Flags
+# nvs: the Zigbee stack's persistent data (Config.Zigbee.StoragePartition) and the PHY calibration data
 nvs,          data, nvs,     0x9000,   0x6000,
+# phy_init: not used with the current sdkconfig (the PHY init data is in the app); kept as the standard layout
 phy_init,     data, phy,     0xf000,   0x1000,
 factory,      app,  factory, 0x10000,  0x2E0000,
-spiffs,       data, spiffs,  0x3E0000, 0xB000,
-#zb_storage,   data, nvs,     0x3EB000, 0x4000,
-zb_fct,       data, fat,     0x3EF000, 0x1000,
+# Removed (PLAN.md 10.E): spiffs (no file system is used) and zb_fct (no reference in the code or in the managed components).
+# The free flash after the factory app (0x2F0000..0x400000) is unused.

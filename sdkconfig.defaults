@@ -1,40 +1,34 @@
-# --- Rendszer és Arduino beállítások ---
+# sdkconfig.defaults: it is applied only when the generated sdkconfig.<env> file does not exist yet
+# (delete that file, then build, to apply a change made here; or change it with `pio run -t menuconfig`).
+
+# --- System ---
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# measured: the main task uses ~1.8 KB (PLAN.md 10.D)
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+# -O2 (the default is -Og, debug); PLAN.md 10.F: measured once
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# readable backtraces in a panic log
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 
-# --- Zigbee Core engedélyezése ---
+# Task watchdog: watches the idle task only (a task that never blocks for 10 s = a bug); on a timeout panic + restart
+# (the network and the reporting records survive a restart). No application task is subscribed.
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
+# --- Zigbee: router (coordinator/router build), native 802.15.4 radio ---
+# The esp-zigbee-lib 2.x has only these Kconfig keys (ZB_ENABLED, ZB_SDK_1xx, ZB_ZCZR/ZB_ZED/ZB_ZGPD,
+# ZB_RADIO_NATIVE/ZB_RADIO_SPINEL_UART, ZB_DEBUG_MODE). The table sizes are set at runtime, see
+# Config.Zigbee in config.h (ezb_config_memory).
 CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZCZR=y
 CONFIG_ZB_RADIO_NATIVE=y
-CONFIG_ZB_ZR=y
-CONFIG_ESP_ZIGBEE_ENABLED=y
-CONFIG_ZB_ROLE_ROUTER=y
-CONFIG_ESP_ZIGBEE_ROLE_ROUTER=y
-#CONFIG_ZB_ZED=y
 
-# --- A Megnövelt Memóriatáblák ---
-CONFIG_ZB_CONFIG_MAX_EP_NUMBER=32
-CONFIG_ESP_ZB_MAX_EP_NUMBER = 32
-CONFIG_ZB_CONFIG_BINDING_TABLE_SIZE=32
-CONFIG_ZB_CONFIG_REPORT_TABLE_SIZE=64
-
-CONFIG_ZB_CONFIG_MEMORY_BUFFER_COUNT=256
-CONFIG_ZB_CONFIG_MEMORY_BUFFER_SIZE=256
-CONFIG_ZB_CONFIG_ADDRESS_TABLE_SIZE=32
-CONFIG_ZB_CONFIG_APS_ACK_WAIT_TABLE_SIZE=32
-
-CONFIG_ZB_CONFIG_MAX_CLUSTER_NUMBER=64
-CONFIG_ZB_CONFIG_MAX_ATTRIBUTE_NUMBER=300
-
-# --- Egyéb rádiós beállítások ---
+# --- Radios ---
 CONFIG_IEEE802154_ENABLED=y
 CONFIG_BT_ENABLED=n
-CONFIG_ESP_WIFI_ENABLED=n
 CONFIG_OPENTHREAD_ENABLED=n
 
-# Partitioning
+# --- Partitioning ---
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
-
-CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y

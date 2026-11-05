@@ -1,6 +1,5 @@
 // Sys
 #include "esp_log.h"
-#include "esp_system.h"     // esp_restart()
 #include "esp_timer.h"      // esp_timer_get_time()
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"

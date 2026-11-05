@@ -101,7 +101,6 @@ static void print_long() {
 }
 
 static void heartbeat_task(void *pv) {
-    (void)pv;
     const TickType_t period = pdMS_TO_TICKS((uint32_t)Config.Health.HeartbeatS * 1000UL);
     const uint8_t every = Config.Health.HeartbeatLongEvery;
     uint32_t n = 0;

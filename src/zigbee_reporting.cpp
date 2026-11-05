@@ -169,7 +169,6 @@ static volatile bool s_defaults_done = false;   // the task has finished (and st
 
 static void reporting_defaults_task(void *pv)
 {
-    (void)pv;
     const int64_t t0 = esp_timer_get_time();
     write_default_reporting();
     g_diag.rep_stack_free = (uint32_t)uxTaskGetStackHighWaterMark(NULL) + 1;   // +1: 0 = the task has not run

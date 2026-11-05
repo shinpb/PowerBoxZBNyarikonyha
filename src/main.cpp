@@ -88,5 +88,6 @@ extern "C" void app_main() {
         start_measurement_tasks();
     }
 
-    LOGI_SETUP("Setup done");
+    // One-time measurement for the CONFIG_ESP_MAIN_TASK_STACK_SIZE decision (the main task ends right after this)
+    LOGI_SETUP("Setup done, main task stack free (min): %u B", (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }

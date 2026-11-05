@@ -1,5 +1,4 @@
-# This file was automatically generated for projects
-# without default 'CMakeLists.txt' file.
+# Component of the firmware: every .c/.cpp file in this directory.
 
 FILE(GLOB_RECURSE app_sources "*.cpp" "*.c")
 

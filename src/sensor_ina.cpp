@@ -188,8 +188,6 @@ void ina_cycle(bool pre_start) {
                 float voltage_V = 12.0 + (sin(tick_dc + idx*3+channel) * 0.5); 
                 float current_mA = (1.5 + (cos(tick_dc + idx*3+channel) * 0.2))*1000;
 #endif
-                    //const float r_shunt = Config.Sensor.Ina.Shunts[idx][channel];
-                    //current_mA = shuntVoltage_mV / r_shunt;
                     float power_mW = voltage_V * current_mA;
 
                     if(Config.Logging.EnabledMeasurements) {

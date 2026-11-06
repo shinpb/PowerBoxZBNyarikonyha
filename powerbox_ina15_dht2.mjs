@@ -3,7 +3,8 @@
 // Install: copy to <zigbee2mqtt>/data/external_converters/powerbox_ina15_dht2.mjs
 //          restart Zigbee2MQTT, then remove + re-pair the device (or use "Reconfigure").
 //
-// Endpoint map MUST match config.h:
+// Endpoint map and reporting values MUST match the firmware (config.h: Config.Reporting and the endpoint tables;
+// the firmware is the authoritative source, this file is a copy, D4):
 //   EP 0x01                  -> Board Temperature; Basic cluster
 //   EP 0x02, 0x03            -> DHT #1, #2 (temperature + humidity)
 //   EP 0x10..0x12            -> INA3221 #1 CH1..3
@@ -17,7 +18,7 @@
 //   dcCurrent 0x0103  int16  mA   (divisor 1000)  -> A
 //   dcPower   0x0106  int16  cW   (divisor 100)   -> W  (1 raw unit = 10 mW)
 //
-// Unavailable sensor (firmware 4.7): the device writes the ZCL "invalid" value into the attribute
+// Unavailable sensor: the device writes the ZCL "invalid" value into the attribute
 //   temperature 0x8000 (-32768), humidity 0xFFFF, DC int16 0x8000 (-32768)
 // and this converter publishes null for it (Home Assistant: "unknown"), instead of -327.68 / 655.35 / -32.768.
 
@@ -49,13 +50,26 @@ INA_EPS.forEach((channels, mod) => {
     });
 });
 
+// ---------------------------------------------------------------- reporting (mirror of Config.Reporting)
+// min/max in seconds, change in raw ZCL units. The firmware writes the same values as factory defaults, so a
+// Reconfigure from Z2M does not change anything unless one of these constants is edited.
+const REPORTING = {
+    board: {min: 5, max: 60, change: 50}, // 0.5 degC
+    dhtTemperature: {min: 5, max: 60, change: 50}, // 0.5 degC
+    dhtHumidity: {min: 5, max: 60, change: 200}, // 2 %RH
+    dcVoltage: {min: 2, max: 30, change: 60}, // 60 mV
+    dcCurrent: {min: 2, max: 30, change: 30}, // 30 mA
+    dcPower: {min: 2, max: 30, change: 30}, // 300 mW (raw unit 10 mW)
+    fault: {min: 0, max: 3600, change: 1},
+};
+
 // ---------------------------------------------------------------- DC attributes
 const ATTR_DC_VOLTAGE = 0x0100;
 const ATTR_DC_CURRENT = 0x0103;
 const ATTR_DC_POWER = 0x0106;
 const TYPE_INT16 = 0x29;
 
-// ZCL invalid measurement values (must match sensor_manager.h)
+// ZCL invalid measurement values (must match zcl_values.h)
 const INVALID_INT16 = -32768; // 0x8000: temperature, DC voltage/current/power
 const INVALID_UINT16 = 0xffff; // humidity
 const isInvalid = (raw, invalidValue) =>
@@ -86,8 +100,8 @@ const fzDcMeasurement = {
 };
 
 // ---------------------------------------------------------------- device fault indication (EP 0x01)
-// Firmware 4.8: standard Binary Input (genBinaryInput, presentValue = any fault) plus a manufacturer-specific
-// cluster with the fault mask (bitmap32). Must match zigbee_manager.h / health.h:
+// Standard Binary Input (genBinaryInput, presentValue = any fault) plus a manufacturer-specific
+// cluster with the fault mask (bitmap32). Must match health.h (HF_SENS_*, HF_BUS_* << 16) and zcl_values.h:
 //   bits 0..15  sensor faults: 0 board, 1..2 DHT1..2, 8..12 INA1..5
 //   bits 16..23 bus faults:    16 I2C init, 17 I2C bus 0, 18 I2C bus 1
 const DIAG_CLUSTER = 'powerboxDiag';
@@ -155,13 +169,19 @@ const nullOnInvalid = (extend, cluster, property, invalidValue) => {
     return extend;
 };
 
-// min/max in seconds, change in raw ZCL units (0.01 degC / 0.01 %RH)
+// The board and the DHT temperature share the endpoint list of one extend, so their reporting must be equal.
 const temperatureExtend = nullOnInvalid(
-    m.temperature({endpointNames: ['board', ...Object.keys(DHT_ENDPOINTS)], reporting: {min: 5, max: 60, change: 50}}),
+    m.temperature({
+        endpointNames: ['board', ...Object.keys(DHT_ENDPOINTS)],
+        reporting: {min: REPORTING.dhtTemperature.min, max: REPORTING.dhtTemperature.max, change: REPORTING.dhtTemperature.change},
+    }),
     'msTemperatureMeasurement', 'temperature', INVALID_INT16,
 );
 const humidityExtend = nullOnInvalid(
-    m.humidity({endpointNames: Object.keys(DHT_ENDPOINTS), reporting: {min: 5, max: 60, change: 200}}),
+    m.humidity({
+        endpointNames: Object.keys(DHT_ENDPOINTS),
+        reporting: {min: REPORTING.dhtHumidity.min, max: REPORTING.dhtHumidity.max, change: REPORTING.dhtHumidity.change},
+    }),
     'msRelativeHumidity', 'humidity', INVALID_UINT16,
 );
 
@@ -220,14 +240,19 @@ const definition = {
             try {
                 await reporting.bind(board, coordinatorEndpoint, ['genBinaryInput', DIAG_CLUSTER]);
                 await board.configureReporting('genBinaryInput', [
-                    {attribute: 'presentValue', minimumReportInterval: 0, maximumReportInterval: 3600, reportableChange: 1},
+                    {
+                        attribute: 'presentValue',
+                        minimumReportInterval: REPORTING.fault.min,
+                        maximumReportInterval: REPORTING.fault.max,
+                        reportableChange: REPORTING.fault.change,
+                    },
                 ]);
                 await board.configureReporting(DIAG_CLUSTER, [
                     {
                         attribute: {ID: DIAG_ATTR_FAULT_MASK, type: TYPE_BITMAP32},
-                        minimumReportInterval: 0,
-                        maximumReportInterval: 3600,
-                        reportableChange: 1,
+                        minimumReportInterval: REPORTING.fault.min,
+                        maximumReportInterval: REPORTING.fault.max,
+                        reportableChange: REPORTING.fault.change,
                     },
                 ]);
                 await board.read('genBinaryInput', ['presentValue']);
@@ -237,6 +262,8 @@ const definition = {
             }
         }
 
+        // 15 DC endpoints: every endpoint is tried (one failure does not stop the others), the errors are
+        // collected per endpoint and reported together at the end.
         for (const [name, id] of Object.entries(DC_ENDPOINTS)) {
             const endpoint = device.getEndpoint(id);
             if (!endpoint) {
@@ -248,21 +275,21 @@ const definition = {
                 await endpoint.configureReporting('haElectricalMeasurement', [
                     {
                         attribute: {ID: ATTR_DC_VOLTAGE, type: TYPE_INT16},
-                        minimumReportInterval: 2,
-                        maximumReportInterval: 30,
-                        reportableChange: 60, // 60 mV
+                        minimumReportInterval: REPORTING.dcVoltage.min,
+                        maximumReportInterval: REPORTING.dcVoltage.max,
+                        reportableChange: REPORTING.dcVoltage.change,
                     },
                     {
                         attribute: {ID: ATTR_DC_CURRENT, type: TYPE_INT16},
-                        minimumReportInterval: 2,
-                        maximumReportInterval: 30,
-                        reportableChange: 30, // 30 mA
+                        minimumReportInterval: REPORTING.dcCurrent.min,
+                        maximumReportInterval: REPORTING.dcCurrent.max,
+                        reportableChange: REPORTING.dcCurrent.change,
                     },
                     {
                         attribute: {ID: ATTR_DC_POWER, type: TYPE_INT16},
-                        minimumReportInterval: 2,
-                        maximumReportInterval: 30,
-                        reportableChange: 30, // 300 mW (raw unit 10 mW)
+                        minimumReportInterval: REPORTING.dcPower.min,
+                        maximumReportInterval: REPORTING.dcPower.max,
+                        reportableChange: REPORTING.dcPower.change,
                     },
                 ]);
             } catch (error) {
@@ -270,7 +297,10 @@ const definition = {
             }
         }
         if (failures.length > 0) {
-            throw new Error(`DC reporting setup failed: ${failures.join(' | ')}`);
+            throw new Error(
+                `Reporting setup failed on ${failures.length} of ${Object.keys(DC_ENDPOINTS).length + 1} endpoint groups ` +
+                    `(Reconfigure repeats it): ${failures.join(' | ')}`,
+            );
         }
     },
 };

@@ -41,13 +41,37 @@ void init_native_i2c_buses() {
 #ifndef DUMMY_SENSOR_MODE
 static inline uint8_t ina_bus_of(int idx) { return (idx < Config.Sensor.Ina.CountBus0) ? 0 : 1; }
 
+// Time of one measurement cycle of a module (3 channels, shunt + bus conversion each) in us, from the enums.
+static uint32_t ina_cycle_us() {
+    static const uint16_t ct_us[8]  = {140, 204, 332, 588, 1100, 2116, 4156, 8244};
+    static const uint16_t avg_n[8]  = {1, 4, 16, 64, 128, 256, 512, 1024};
+    const uint32_t per_channel = (uint32_t)avg_n[Config.Sensor.Ina.Avg] *
+                                 ((uint32_t)ct_us[Config.Sensor.Ina.ShuntCt] + ct_us[Config.Sensor.Ina.BusCt]);
+    return per_channel * INA3221_BUS_NUMBER;
+}
+
+static void ina_log_mode_once() {
+    static bool logged = false;
+    if (logged) return;
+    logged = true;
+    const uint32_t cyc = ina_cycle_us();
+    LOGI_SETUP("INA mode: avg %d, shunt CT %d, bus CT %d (enum values), cycle %u ms",
+               (int)Config.Sensor.Ina.Avg, (int)Config.Sensor.Ina.ShuntCt, (int)Config.Sensor.Ina.BusCt,
+               (unsigned)((cyc + 500) / 1000));
+    if (cyc > (uint32_t)Config.Measurement.DcMs * 500U) {
+        LOGW_SETUP("INA cycle %u ms is more than half of the DC period (%d ms): the readings may be stale",
+                   (unsigned)((cyc + 500) / 1000), Config.Measurement.DcMs);
+    }
+}
+
 // Initializes (or re-initializes) one INA3221 module. Returns ESP_OK on success.
 static esp_err_t ina_init_one(int idx) {
     esp_err_t e;
+    ina_log_mode_once();
     if (!s_ina_desc_ok[idx]) {
         for (uint8_t channel = 0; channel < INA3221_BUS_NUMBER; channel++) {
             ina3221_arr[idx].shunt[channel] =
-                (uint16_t)(Config.Sensor.Ina.Shunts[idx][channel] * 1000); // Ohm -> mOhm
+                (uint16_t)lroundf(Config.Sensor.Ina.Shunts[idx][channel] * 1000.0f); // Ohm -> mOhm (the library takes integer mOhm)
         }
         uint8_t bus_idx = ina_bus_of(idx);
         uint8_t i2c_addr = Config.Sensor.Ina.BaseAddr + (
@@ -74,7 +98,14 @@ static esp_err_t ina_init_one(int idx) {
         true    // shunt measurement enabled
     );
     if (e != ESP_OK) return e;
-    return ina3221_enable_channel(&ina3221_arr[idx], true, true, true);
+    e = ina3221_enable_channel(&ina3221_arr[idx], true, true, true);
+    if (e != ESP_OK) return e;
+    // Hardware averaging and conversion times (the library's own start value is the noisiest: Avg 1, 140 us)
+    e = ina3221_set_average(&ina3221_arr[idx], Config.Sensor.Ina.Avg);
+    if (e != ESP_OK) return e;
+    e = ina3221_set_shunt_conversion_time(&ina3221_arr[idx], Config.Sensor.Ina.ShuntCt);
+    if (e != ESP_OK) return e;
+    return ina3221_set_bus_conversion_time(&ina3221_arr[idx], Config.Sensor.Ina.BusCt);
 }
 
 // Bus / sensor error flags from the per-module failure counters.
@@ -196,7 +227,7 @@ void ina_cycle(bool pre_start) {
 
                     int16_t measured_v = (int16_t)lroundf(voltage_V * 1000.0f);
                     int16_t measured_i = (int16_t)lroundf(current_mA);
-                    int16_t measured_p = (int16_t)lroundf(power_mW / 10.0f); // cW because of int16 (max 327.67 W: 12.6 A at 26 V; the planned 12..15 V / <10 A fits)
+                    int16_t measured_p = (int16_t)lroundf(power_mW / 10.0f); // cW because of int16 (max 327.67 W; not a limit: the R100 shunt measures at most 1.638 A, 42.6 W at 26 V)
 
                     if (publish) zb_write_dc(Config.Zigbee.Ina.Endpoints[idx][channel], measured_v, measured_i, measured_p, pre_start);
 #ifndef DUMMY_SENSOR_MODE

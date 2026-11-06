@@ -57,11 +57,16 @@ const REPORTING = {
     board: {min: 5, max: 60, change: 50}, // 0.5 degC
     dhtTemperature: {min: 5, max: 60, change: 50}, // 0.5 degC
     dhtHumidity: {min: 5, max: 60, change: 200}, // 2 %RH
-    dcVoltage: {min: 2, max: 30, change: 60}, // 60 mV
-    dcCurrent: {min: 2, max: 30, change: 30}, // 30 mA
-    dcPower: {min: 2, max: 30, change: 30}, // 300 mW (raw unit 10 mW)
+    dc: {min: 2, max: 30}, // thresholds per channel: DC_THRESHOLDS
     fault: {min: 0, max: 3600, change: 1},
 };
+
+// DC thresholds per channel in raw units (mV, mA, cW = 10 mW), mirror of Config.Reporting.Dc.Thresholds.
+// ina1..ina4: 60 mV / 30 mA / 300 mW; ina5 (batteries, charger; 10 mOhm shunt): 60 mV / 100 mA / 1 W.
+const DC_THRESHOLDS = {};
+for (const name of Object.keys(DC_ENDPOINTS)) {
+    DC_THRESHOLDS[name] = name.startsWith('ina5') ? {voltage: 60, current: 100, power: 100} : {voltage: 60, current: 30, power: 30};
+}
 
 // ---------------------------------------------------------------- DC attributes
 const ATTR_DC_VOLTAGE = 0x0100;
@@ -275,21 +280,21 @@ const definition = {
                 await endpoint.configureReporting('haElectricalMeasurement', [
                     {
                         attribute: {ID: ATTR_DC_VOLTAGE, type: TYPE_INT16},
-                        minimumReportInterval: REPORTING.dcVoltage.min,
-                        maximumReportInterval: REPORTING.dcVoltage.max,
-                        reportableChange: REPORTING.dcVoltage.change,
+                        minimumReportInterval: REPORTING.dc.min,
+                        maximumReportInterval: REPORTING.dc.max,
+                        reportableChange: DC_THRESHOLDS[name].voltage,
                     },
                     {
                         attribute: {ID: ATTR_DC_CURRENT, type: TYPE_INT16},
-                        minimumReportInterval: REPORTING.dcCurrent.min,
-                        maximumReportInterval: REPORTING.dcCurrent.max,
-                        reportableChange: REPORTING.dcCurrent.change,
+                        minimumReportInterval: REPORTING.dc.min,
+                        maximumReportInterval: REPORTING.dc.max,
+                        reportableChange: DC_THRESHOLDS[name].current,
                     },
                     {
                         attribute: {ID: ATTR_DC_POWER, type: TYPE_INT16},
-                        minimumReportInterval: REPORTING.dcPower.min,
-                        maximumReportInterval: REPORTING.dcPower.max,
-                        reportableChange: REPORTING.dcPower.change,
+                        minimumReportInterval: REPORTING.dc.min,
+                        maximumReportInterval: REPORTING.dc.max,
+                        reportableChange: DC_THRESHOLDS[name].power,
                     },
                 ]);
             } catch (error) {

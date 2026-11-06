@@ -54,6 +54,8 @@ struct rec_t {
     uint16_t    cluster;
     uint16_t    attr;
     rec_kind_t  kind;
+    uint8_t     ina = 0;   // DC records: module and channel (index of Config.Reporting.Dc.Thresholds)
+    uint8_t     ch  = 0;
 };
 
 // Calls f(const rec_t &) for every reportable attribute of the device (52 records: board 1 + fault 2 + DHT 2x2 + DC 15x3).
@@ -74,11 +76,11 @@ static void for_each_record(F &&f)
         for (int ch = 0; ch < INA3221_BUS_NUMBER; ch++) {
             const uint8_t ep = Config.Zigbee.Ina.Endpoints[i][ch];
             f(rec_t{"dc V", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, RK_DC_V});
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, RK_DC_V, (uint8_t)i, (uint8_t)ch});
             f(rec_t{"dc I", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, RK_DC_I});
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, RK_DC_I, (uint8_t)i, (uint8_t)ch});
             f(rec_t{"dc P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
-                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RK_DC_P});
+                    EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RK_DC_P, (uint8_t)i, (uint8_t)ch});
         }
     }
     f(rec_t{"fault", ep_b, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
@@ -87,9 +89,10 @@ static void for_each_record(F &&f)
 }
 
 // Reporting parameters of a record from Config.Reporting. false = the global or the category switch is off.
-static bool report_params(rec_kind_t kind, uint16_t &min_s, uint16_t &max_s, ezb_zcl_attr_variable_t &delta)
+static bool report_params(const rec_t &r, uint16_t &min_s, uint16_t &max_s, ezb_zcl_attr_variable_t &delta)
 {
     const auto &RP = Config.Reporting;
+    const rec_kind_t kind = r.kind;
     delta = {};   // discrete attributes (bool, bitmap32): any change is reported, the delta is not used
     if (!RP.Enabled) return false;
     switch (kind) {
@@ -114,9 +117,12 @@ static bool report_params(rec_kind_t kind, uint16_t &min_s, uint16_t &max_s, ezb
         if (!RP.Dc.Enabled) return false;
         min_s = RP.Dc.MinInterval; max_s = RP.Dc.MaxInterval;
         // raw units follow the divisors of the endpoints (ZCL_DC_DIV_*)
-        if (kind == RK_DC_V)      delta.s16 = scaled_s16(RP.Dc.ThresholdVolt, ZCL_DC_DIV_V);
-        else if (kind == RK_DC_I) delta.s16 = scaled_s16(RP.Dc.ThresholdCur, ZCL_DC_DIV_I);
-        else                      delta.s16 = scaled_s16(RP.Dc.ThresholdPwr, ZCL_DC_DIV_P);
+        {
+            const DcReportThr &th = RP.Dc.Thresholds[r.ina][r.ch];   // per channel
+            if (kind == RK_DC_V)      delta.s16 = scaled_s16(th.Volt, ZCL_DC_DIV_V);
+            else if (kind == RK_DC_I) delta.s16 = scaled_s16(th.Cur, ZCL_DC_DIV_I);
+            else                      delta.s16 = scaled_s16(th.Pwr, ZCL_DC_DIV_P);
+        }
         return true;
     case RK_FAULT:
     case RK_FAULT_MASK:
@@ -146,7 +152,7 @@ static void write_default_reporting()
     for_each_record([](const rec_t &r) {
         uint16_t min_s = 0, max_s = 0;
         ezb_zcl_attr_variable_t delta;
-        if (report_params(r.kind, min_s, max_s, delta)) {
+        if (report_params(r, min_s, max_s, delta)) {
             set_default_report(r.name, r.ep, r.cluster, r.attr, min_s, max_s, &delta);
         }
     });

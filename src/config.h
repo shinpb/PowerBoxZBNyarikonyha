@@ -14,6 +14,13 @@
 #define n_INA 5
 #define n_DHT 2
 #define n_I2C 2
+// Reporting thresholds of one DC channel (raw ZCL units follow the endpoint divisors, see zcl_values.h)
+struct DcReportThr {
+    float Volt;   // V
+    float Cur;    // A
+    float Pwr;    // W
+};
+
 struct AppConfig {
     // Device & Identification
     struct {
@@ -96,7 +103,7 @@ struct AppConfig {
     // them afterwards, and a plain reboot never touches them. Enabled = 0: that category is left entirely to the
     // coordinator (its records stay at the stack default until the coordinator configures them).
     // Keep the values equal to the converter's configure() (D4): temperature 5/60 s 0.5 C, humidity 2 %,
-    // DC 2/30 s 60 mV / 30 mA / 300 mW, fault 0/3600 s.
+    // DC 2/30 s with the per channel thresholds of Dc.Thresholds, fault 0/3600 s.
     struct {
         const uint8_t Enabled = 1;          // global switch, 0 = no firmware default reporting at all
 
@@ -119,9 +126,15 @@ struct AppConfig {
             const uint8_t  Enabled = 1;
             const uint16_t MaxInterval = 30;
             const uint16_t MinInterval = 2;
-            const float ThresholdVolt = 0.06f;  // V
-            const float ThresholdCur = 0.03f;   // A
-            const float ThresholdPwr = 0.30f;   // W (~6 % of the reference load's 5 W max; per-channel limits will follow the wiring/shunt choice)
+            // Per channel thresholds {V, A, W}, indexed like Ina.Shunts. The current threshold is kept at >= ~20 LSB of the
+            // channel's shunt (LSB = 40 uV / R) and about 1 % of its expected peak (shunt_fuse.txt); INA5 = batteries/charger (10 mOhm, 10 A).
+            const DcReportThr Thresholds[n_INA][INA3221_BUS_NUMBER] = {
+                {{0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}},   // INA1: ESP32, RPi (25 mOhm), switch
+                {{0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}},   // INA2: POE uplink, KAM 0, KAM 1
+                {{0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}},   // INA3: spare
+                {{0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}, {0.06f, 0.03f, 0.30f}},   // INA4: spare
+                {{0.06f, 0.10f, 1.00f}, {0.06f, 0.10f, 1.00f}, {0.06f, 0.10f, 1.00f}},   // INA5: BTR 0, BTR 1, CHARGER (10 mOhm)
+            };
         } Dc;
 
         struct {                            // fault indication: Binary Input (EP 1) + 0xFC11 fault mask
@@ -166,12 +179,21 @@ struct AppConfig {
             const uint8_t Count = n_INA;
             const uint8_t CountBus0 = 4;       // modules 0..CountBus0-1 on I2C bus 0, the rest on bus 1
             const uint8_t BaseAddr = 0x40;     // I2C address of the first module on each bus (A0/A1 strapping: +0, +1, ...)
+            // Measurement mode (hardware averaging and conversion times, see SHUNT_CALC.md 8). Per channel the shunt
+            // integrates ShuntCt x Avg, the bus ADC BusCt x Avg; one cycle of a module = 3 x (shunt + bus) time and
+            // has to stay well below Measurement.DcMs (checked and logged at the init: "INA mode"). The chip default is
+            // Avg 1, 1.1 ms; the library starts from 0 (Avg 1, 140 us: the noisiest setting).
+            const ina3221_avg_t Avg     = INA3221_AVG_16;
+            const ina3221_ct_t  ShuntCt = INA3221_CT_4156;
+            const ina3221_ct_t  BusCt   = INA3221_CT_332;
+            // Shunt resistance in Ohm per channel (whole mOhm only: the library takes integer mOhm). Range = 0.1638 V / R.
+            // Plan and rationale: hwdocs/shunt_fuse.txt, SHUNT_CALC.md (D19).
             const float Shunts[n_INA][INA3221_BUS_NUMBER] = {
-                {0.1f, 0.1f, 0.1f},
-                {0.1f, 0.1f, 0.1f},
-                {0.1f, 0.1f, 0.1f},
-                {0.1f, 0.1f, 0.1f},
-                {0.1f, 0.1f, 0.1f},
+                {0.1f,   0.025f, 0.1f},     // INA1: ESP32 (5 V), RPi (5 V, 2x0.05 parallel, 6.55 A), Mikrotik switch
+                {0.1f,   0.1f,   0.1f},     // INA2: POE uplink, KAM 0, KAM 1
+                {0.1f,   0.1f,   0.1f},     // INA3: spare
+                {0.1f,   0.1f,   0.1f},     // INA4: spare
+                {0.01f,  0.01f,  0.01f},    // INA5: BTR 0, BTR 1, CHARGER (2x0.02 parallel, 16.4 A)
             };
         } Ina;
 

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="832" height="770" font-family="Arial, sans-serif"><rect width="100%" height="100%" fill="#fff"/><text x="36" y="22" font-size="15" font-weight="bold">Doboz alja, felulnezet fedel nelkul (190 x 145) - elrendezes - draft 12</text>
+<rect x="36.0" y="66.0" width="760.0" height="580.0" fill="#fff" stroke="#000" stroke-width="2"/>
+<rect x="36.0" y="66.0" width="52.0" height="52.0" fill="#bbb" stroke="#666" stroke-width="1"/>
+<text x="62.0" y="98.0" font-size="6" text-anchor="middle" fill="#111" font-weight="normal">csavar</text>
+<rect x="744.0" y="66.0" width="52.0" height="52.0" fill="#bbb" stroke="#666" stroke-width="1"/>
+<text x="770.0" y="98.0" font-size="6" text-anchor="middle" fill="#111" font-weight="normal">csavar</text>
+<rect x="36.0" y="594.0" width="52.0" height="52.0" fill="#bbb" stroke="#666" stroke-width="1"/>
+<text x="62.0" y="626.0" font-size="6" text-anchor="middle" fill="#111" font-weight="normal">csavar</text>
+<rect x="744.0" y="594.0" width="52.0" height="52.0" fill="#bbb" stroke="#666" stroke-width="1"/>
+<text x="770.0" y="626.0" font-size="6" text-anchor="middle" fill="#111" font-weight="normal">csavar</text>
+<circle cx="122.0" cy="156.0" r="32.0" fill="#fde" fill-opacity="0.35" stroke="#c0a" stroke-width="1" stroke-dasharray="5 3"/>
+<circle cx="122.0" cy="156.0" r="7.0" fill="#fff" stroke="#c0a" stroke-width="1.4"/>
+<circle cx="710.0" cy="156.0" r="32.0" fill="#fde" fill-opacity="0.35" stroke="#c0a" stroke-width="1" stroke-dasharray="5 3"/>
+<circle cx="710.0" cy="156.0" r="7.0" fill="#fff" stroke="#c0a" stroke-width="1.4"/>
+<circle cx="122.0" cy="556.0" r="32.0" fill="#fde" fill-opacity="0.35" stroke="#c0a" stroke-width="1" stroke-dasharray="5 3"/>
+<circle cx="122.0" cy="556.0" r="7.0" fill="#fff" stroke="#c0a" stroke-width="1.4"/>
+<circle cx="710.0" cy="556.0" r="32.0" fill="#fde" fill-opacity="0.35" stroke="#c0a" stroke-width="1" stroke-dasharray="5 3"/>
+<circle cx="710.0" cy="556.0" r="7.0" fill="#fff" stroke="#c0a" stroke-width="1.4"/>
+<rect x="36.0" y="66.0" width="760.0" height="32.0" fill="#f4f4f4" fill-opacity="0.6" stroke="#999" stroke-width="0.8" stroke-dasharray="2 2"/>
+<text x="416.0" y="86.8" font-size="6" text-anchor="middle" fill="#777" font-weight="normal">8 mm tilos sav (ESP, DC/DC, INA)</text>
+<rect x="156.0" y="82.0" width="140.0" height="108.0" fill="none" stroke="#6a6" stroke-width="0.7" stroke-dasharray="1.5 2"/>
+<rect x="280.0" y="82.0" width="100.0" height="120.0" fill="none" stroke="#6a6" stroke-width="0.7" stroke-dasharray="1.5 2"/>
+<rect x="364.0" y="82.0" width="100.0" height="152.0" fill="none" stroke="#6a6" stroke-width="0.7" stroke-dasharray="1.5 2"/>
+<rect x="172.0" y="98.0" width="108.0" height="76.0" fill="#eef" stroke="#447" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="226.0" y="140.0" font-size="8" text-anchor="middle" fill="#111" font-weight="bold">ESP32</text>
+<rect x="296.0" y="98.0" width="68.0" height="88.0" fill="#ffeedd" stroke="#a60" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="330.0" y="146.0" font-size="7" text-anchor="middle" fill="#111" font-weight="bold">3,3V</text>
+<text x="330.0" y="166.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">17x22</text>
+<rect x="380.0" y="98.0" width="68.0" height="120.0" fill="#ffeedd" stroke="#a60" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="414.0" y="162.0" font-size="7" text-anchor="middle" fill="#111" font-weight="bold">5V</text>
+<text x="414.0" y="198.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">17x30</text>
+<rect x="48.0" y="264.0" width="152.0" height="128.0" fill="#dbe9ff" stroke="#444" stroke-width="1.2"/>
+<text x="124.0" y="332.0" font-size="9" text-anchor="middle" fill="#111" font-weight="bold">INA1</text>
+<text x="124.0" y="284.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">adat</text>
+<text x="124.0" y="384.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">merok</text>
+<rect x="208.0" y="264.0" width="152.0" height="128.0" fill="#e3f5dc" stroke="#444" stroke-width="1.2"/>
+<text x="284.0" y="332.0" font-size="9" text-anchor="middle" fill="#111" font-weight="bold">INA2</text>
+<text x="284.0" y="284.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">adat</text>
+<text x="284.0" y="384.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">merok</text>
+<rect x="368.0" y="264.0" width="152.0" height="128.0" fill="#eeeeee" stroke="#444" stroke-width="1.2"/>
+<text x="444.0" y="332.0" font-size="9" text-anchor="middle" fill="#111" font-weight="bold">INA3</text>
+<text x="444.0" y="284.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">adat</text>
+<text x="444.0" y="384.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">merok</text>
+<rect x="528.0" y="264.0" width="152.0" height="128.0" fill="#fff3c9" stroke="#444" stroke-width="1.2"/>
+<text x="604.0" y="332.0" font-size="9" text-anchor="middle" fill="#111" font-weight="bold">INA4</text>
+<text x="604.0" y="284.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">adat</text>
+<text x="604.0" y="384.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">merok</text>
+<rect x="524.0" y="98.0" width="152.0" height="128.0" fill="#ffe3cc" stroke="#444" stroke-width="1.2"/>
+<text x="600.0" y="166.0" font-size="9" text-anchor="middle" fill="#111" font-weight="bold">INA5</text>
+<text x="600.0" y="118.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">adat</text>
+<text x="600.0" y="218.0" font-size="5" text-anchor="middle" fill="#555" font-weight="normal">merok</text>
+<rect x="180.0" y="463.0" width="448.0" height="16.0" fill="#fff" stroke="#a80" stroke-width="0.8" stroke-dasharray="2 2"/>
+<rect x="180.0" y="559.0" width="448.0" height="16.0" fill="#fff" stroke="#a80" stroke-width="0.8" stroke-dasharray="2 2"/>
+<rect x="180.0" y="479.0" width="448.0" height="80.0" fill="#fff6c8" stroke="#a80" stroke-width="1.2"/>
+<text x="404.0" y="523.0" font-size="8" text-anchor="middle" fill="#111" font-weight="bold"></text>
+<text x="196.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">1</text>
+<text x="228.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">2</text>
+<text x="260.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">3</text>
+<text x="292.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">4</text>
+<text x="324.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">5</text>
+<text x="356.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">6</text>
+<text x="388.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">7</text>
+<text x="420.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">8</text>
+<text x="452.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">9</text>
+<text x="484.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">10</text>
+<text x="516.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">11</text>
+<text x="548.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">12</text>
+<text x="580.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">13</text>
+<text x="612.0" y="539.0" font-size="8" text-anchor="middle" fill="#555" font-weight="normal">14</text>
+<text x="404.0" y="503.0" font-size="7" text-anchor="middle" fill="#333" font-weight="bold">sorkapocs 14 poz. 112x20x16</text>
+<rect x="708.0" y="286.0" width="88.0" height="140.0" fill="#e6e6e6" stroke="#777" stroke-width="1" stroke-dasharray="5 3"/>
+<rect x="726.0" y="180.0" width="52.0" height="352.0" fill="#cfe0ff" stroke="#036" stroke-width="1.4"/>
+<text x="752.0" y="366.0" font-size="8" text-anchor="middle" fill="#024" font-weight="bold" transform="rotate(-90 752.0 366.0)">0V busbar 88x13</text>
+<rect x="702.0" y="180.0" width="24.0" height="352.0" fill="#9bd" fill-opacity="0.35" stroke="#036" stroke-width="0.8" stroke-dasharray="2 2"/>
+<text x="714.0" y="174.0" font-size="5" text-anchor="middle" fill="#036" font-weight="normal">6 mm</text>
+<polyline points="726.0,192.0 718.0,192.0" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,221.2 718.0,221.2" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,250.4 718.0,250.4" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,279.6 718.0,279.6" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,308.8 718.0,308.8" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,338.0 718.0,338.0" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,367.2 718.0,367.2" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,396.4 718.0,396.4" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,425.6 718.0,425.6" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,454.8 718.0,454.8" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,484.0 718.0,484.0" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="726.0,513.2 718.0,513.2" fill="none" stroke="#111" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="448.0" y="398.0" width="80.0" height="64.0" fill="none" stroke="#c60" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="488.0" y="393.2" font-size="6" text-anchor="middle" fill="#a40" font-weight="normal">kotegle-futas</text>
+<rect x="240.0" y="84.0" width="352.0" height="52.0" fill="none" stroke="#a00" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="416.0" y="142.8" font-size="5" text-anchor="middle" fill="#a00" font-weight="normal">piros busbar benyulasa a fedelbol</text>
+<text x="36.0" y="670.0" font-size="8" text-anchor="start" fill="#444" font-weight="normal">Szaggatott zona: 4 mm sorkapocs, 6 mm busbar, 8 mm biztositek-sor (erveghuvely + vezetek hajlitas). Lila kor: rogzito csavar tiltott zona, atmero 16 mm. Szurke: busbar rogzito femlemez 22 x 35 mm.</text>
+</svg>

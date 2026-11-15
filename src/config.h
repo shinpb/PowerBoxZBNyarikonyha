@@ -193,7 +193,7 @@ struct AppConfig {
                 {0.1f,   0.1f,   0.1f},     // INA2: POE uplink, KAM 0, KAM 1
                 {0.1f,   0.1f,   0.1f},     // INA3: spare
                 {0.1f,   0.1f,   0.1f},     // INA4: spare
-                {0.01f,  0.01f,  0.01f},    // INA5: BTR 0, BTR 1, CHARGER (2x0.02 parallel, 16.4 A)
+                {0.01f,  0.02f,  0.01f},    // INA5: BTR 0 (2x0.02), BTR 1 (TEMPORARY 1x0.02, 8.2 A), CHARGER (2x0.02); 16.4 A / 8.2 A / 16.4 A
             };
         } Ina;
 

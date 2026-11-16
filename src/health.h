@@ -20,13 +20,16 @@ typedef enum {
 #define HF_ZB_NOT_JOINED    (1u << 0)   // not (yet) joined / left the network
 #define HF_ZB_START_FAILED  (1u << 1)   // BDB start/initialization failed (retrying)
 #define HF_ZB_REG_FAILED    (1u << 2)   // endpoint registration failed
-// HM_BUS
+// HM_BUS (bits 0..7 go to the Zigbee fault mask as bits 16..23)
 #define HF_BUS_I2C_INIT     (1u << 0)   // i2cdev_init() failed
-#define HF_BUS_I2C(b)       (1u << (1 + (b)))   // all devices on I2C bus b fail
-// HM_SENSOR
+#define HF_BUS_I2C(b)       (1u << (1 + (b)))   // all devices on I2C bus b fail (b = 0..2, bits 1..3)
+#define HF_BUS_UART_INIT    (1u << 4)   // UART driver / pin setup of a bus failed or its pin configuration is invalid (log: which bus)
+#define HF_BUS_UART(b)      (1u << (5 + (b)))   // all PZEM modules of UART bus b fail (b = 0..2, bits 5..7; only with >= 2 modules on the bus)
+// HM_SENSOR (bits 0..15 go to the Zigbee fault mask as they are)
 #define HF_SENS_BOARD       (1u << 0)   // board temperature sensor
-#define HF_SENS_DHT(i)      (1u << (1 + (i)))   // DHT i (consecutive read failures)
-#define HF_SENS_INA(i)      (1u << (8 + (i)))   // INA3221 module i
+#define HF_SENS_DHT(i)      (1u << (1 + (i)))   // DHT i (consecutive read failures), i = 0..6
+#define HF_SENS_INA(i)      (1u << (8 + (i)))   // INA3221 module i, i = 0..4 (bits 8..12)
+#define HF_SENS_PZEM(i)     (1u << (13 + (i)))  // PZEM-004T module i, i = 0..2 (bits 13..15)
 
 // Call once, first thing in app_main(): every module starts in the HF_STARTING state (pins high).
 void health_init();

@@ -43,14 +43,14 @@ static int stack_free(const char *name) {
 }
 
 static void print_short() {
-    LOGI_HB("up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d ZB=%d BTN=%d HB=%d",
+    LOGI_HB("up=%us heap=%u min=%u big=%u | health z=0x%08X b=0x%08X s=0x%08X g=0x%08X | stack_free DHT=%d DC=%d PZEM=%d ZB=%d BTN=%d HB=%d",
              (unsigned)diag_uptime_s(),
              (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
              (unsigned)health_get(HM_ZIGBEE), (unsigned)health_get(HM_BUS), (unsigned)health_get(HM_SENSOR),
              (unsigned)health_get_global(),
-             stack_free("Task_DHT"), stack_free("Task_DC"), stack_free("Zigbee_main"), stack_free("Task_Button"),
+             stack_free("Task_DHT"), stack_free("Task_DC"), stack_free("Task_PZEM"), stack_free("Zigbee_main"), stack_free("Task_Button"),
              (int)uxTaskGetStackHighWaterMark(NULL));
 }
 
@@ -62,6 +62,9 @@ static void print_long() {
              (unsigned)g_diag.dht_cycle_last_ms, (unsigned)g_diag.dht_cycle_max_ms,
              (unsigned)g_diag.dc_cycle_last_ms, (unsigned)g_diag.dc_cycle_max_ms,
              (unsigned)g_diag.dc_overruns, Config.Measurement.DcMs);
+    LOGI_HB("cycle ms: pzem last=%u max=%u over=%u (period %d)",
+             (unsigned)g_diag.pzem_cycle_last_ms, (unsigned)g_diag.pzem_cycle_max_ms,
+             (unsigned)g_diag.pzem_overruns, Config.Measurement.PzemMs);
 
     p = 0; b[0] = 0;
     append(b, sizeof b, p, "dht ok/fail");
@@ -71,6 +74,21 @@ static void print_long() {
     for (int i = 0; i < Config.Sensor.Ina.Count; i++)
         append(b, sizeof b, p, " %u", (unsigned)g_diag.ina_offline[i]);
     append(b, sizeof b, p, " reinit ok/try=%u/%u", (unsigned)g_diag.ina_reinit_ok, (unsigned)g_diag.ina_reinit_try);
+    LOGI_HB("%s", b);
+
+    // PZEM: ok/timeout/crc/proto per module, offline transitions, probes; UART transfers ok/fail per bus
+    p = 0; b[0] = 0;
+    append(b, sizeof b, p, "pzem ok/tmo/crc/proto");
+    for (int i = 0; i < Config.Sensor.Pzem.Count; i++)
+        append(b, sizeof b, p, " %d=%u/%u/%u/%u", i, (unsigned)g_diag.pzem_ok[i], (unsigned)g_diag.pzem_timeout[i],
+               (unsigned)g_diag.pzem_crc[i], (unsigned)g_diag.pzem_proto[i]);
+    append(b, sizeof b, p, " | offline");
+    for (int i = 0; i < Config.Sensor.Pzem.Count; i++)
+        append(b, sizeof b, p, " %u", (unsigned)g_diag.pzem_offline[i]);
+    append(b, sizeof b, p, " reinit ok/try=%u/%u | uart ok/fail",
+           (unsigned)g_diag.pzem_reinit_ok, (unsigned)g_diag.pzem_reinit_try);
+    for (int i = 0; i < Config.UART.Count; i++)
+        append(b, sizeof b, p, " %d=%u/%u", i, (unsigned)g_diag.uart_ok[i], (unsigned)g_diag.uart_fail[i]);
     LOGI_HB("%s", b);
 
     p = 0; b[0] = 0;
@@ -85,6 +103,11 @@ static void print_long() {
     for (int i = 0; i < Config.Sensor.Ina.Count; i++) {
         append(b, sizeof b, p, " %d=", i);
         append_age(b, sizeof b, p, g_diag.ina_last_ok_s[i]);
+    }
+    append(b, sizeof b, p, " pzem");
+    for (int i = 0; i < Config.Sensor.Pzem.Count; i++) {
+        append(b, sizeof b, p, " %d=", i);
+        append_age(b, sizeof b, p, g_diag.pzem_last_ok_s[i]);
     }
     LOGI_HB("%s", b);
 

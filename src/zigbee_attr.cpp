@@ -4,6 +4,7 @@
 #include "esp_zigbee.h"
 #include "ezbee/zha.h"
 #include "ezbee/zcl/cluster/binary_input.h"
+#include "ezbee/zcl/cluster/metering.h"
 // Internal components
 #include "zigbee_attr.h"
 #include "zigbee_manager.h"   // is_zigbee_connected
@@ -54,6 +55,24 @@ bool zb_write_dc(uint8_t ep, int16_t v, int16_t i, int16_t p, bool pre_start) {
     ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_VOLTAGE_ID, &v);
     ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_CURRENT_ID, &i);
     ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, &p);
+    zb_unlock(pre_start);
+    return true;
+}
+
+bool zb_write_pzem(uint8_t ep, const pzem_zcl_t &z, bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return false;
+    // ezb_zcl_set_attr_value takes a non-const pointer: write from local copies
+    uint16_t v = z.voltage, i = z.current, f = z.freq;
+    int16_t  p = z.power;
+    int8_t   pf = z.pf;
+    uint64_t e = z.energy;   // uint48 attribute: the stack takes the low 6 bytes (little endian, same as the 6 byte wire format)
+    zb_lock(pre_start);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_VOLTAGE_ID, &v);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_CURRENT_ID, &i);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_ACTIVE_POWER_ID, &p);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_FREQUENCY_ID, &f);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT, EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_POWER_FACTOR_ID, &pf);
+    ZB_SET(ep, EZB_ZCL_CLUSTER_ID_METERING, EZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID, &e);
     zb_unlock(pre_start);
     return true;
 }

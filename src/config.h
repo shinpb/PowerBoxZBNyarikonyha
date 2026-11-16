@@ -5,6 +5,9 @@
 #include "dht.h"
 // Drivers
 #include "driver/gpio.h"
+#include "driver/uart.h"
+// Internal (protocol constants only: PZEM_ADDR_DEFAULT; no ESP-IDF dependency)
+#include "pzem_proto.h"
 // Sys
 #include "esp_log.h"
 // STDlib
@@ -14,6 +17,8 @@
 #define n_INA 5
 #define n_DHT 2
 #define n_I2C 2
+#define n_UART 1
+#define n_PZEM 1
 // Reporting thresholds of one DC channel (raw ZCL units follow the endpoint divisors, see zcl_values.h)
 struct DcReportThr {
     float Volt;   // V
@@ -47,6 +52,7 @@ struct AppConfig {
         const TaskDef ReportDefaults  = { 4096,  3 };   // "Rep_defaults" (one-shot)
         const TaskDef MeasDht         = { 4096,  1 };   // "Task_DHT" (DHT + board temperature)
         const TaskDef MeasDc          = { 4096,  1 };   // "Task_DC"
+        const TaskDef MeasPzem        = { 4096,  1 };   // "Task_PZEM" (Modbus polling of the PZEM modules)
         const TaskDef Heartbeat       = { 4096,  1 };   // "Task_HB"
         const TaskDef Button          = { 2048,  1 };   // "Task_Button"
     } Tasks;
@@ -55,6 +61,7 @@ struct AppConfig {
     struct {
         const int DhtMs = 3000;
         const int DcMs = 1000;
+        const int PzemMs = 1000;   // PZEM poll period (the module refreshes its registers a few times per second)
     } Measurement;
 
     // Serial & Logging
@@ -64,6 +71,9 @@ struct AppConfig {
         const uint8_t InaDiag = 0;           // 1 = run the INA3221 register dump (ina_diag()) at boot (bring-up aid, ~25 lines, delays the Zigbee start)
         const uint16_t InaFailLogEvery = 60;     // a failing INA measurement is logged at the first failure and then every N-th cycle
         const uint16_t DhtFailLogEvery = 20;      // a failing DHT read is logged at the first failure of a streak and then every N-th
+        const uint8_t PzemDiag = 0;          // 1 = run the PZEM register dump (pzem_diag()) at boot (bring-up aid: address, alarm threshold, raw registers)
+        const uint8_t PzemRaw = 0;           // 1 = hex dump of every PZEM request/response frame (very verbose, bring-up aid)
+        const uint16_t PzemFailLogEvery = 20;     // a failing PZEM poll is logged at the first failure of a streak and then every N-th
         // Library log levels (the firmware logs the failures itself, the libraries repeat them per retry): ESP_LOG_NONE = silent,
         // ESP_LOG_WARN = library default behaviour (e.g. ~12 lines per failed I2C access).
         const esp_log_level_t I2cdevLibLevel = ESP_LOG_NONE;   // tag "i2cdev" (esp-idf-lib)
@@ -79,6 +89,7 @@ struct AppConfig {
         const char* TagHealth = "Health";
         const char* TagHeartbeat = "Heartbeat";
         const char* TagInaDiag = "INADiag";
+        const char* TagPzemDiag = "PZEMDiag";
     } Logging;
 
     // Error indication & fault handling (see health.h)
@@ -91,14 +102,14 @@ struct AppConfig {
         const int SensorPin = -1;
         const uint8_t  FailThreshold   = 3;    // consecutive failed reads before the error flag is set
         const uint8_t  RecoverThreshold = 3;   // consecutive good reads before the error flag is cleared (hysteresis; while recovering the value stays invalid)
-        const uint16_t RetryS          = 30;   // re-init period of a failed INA module (s)
+        const uint16_t RetryS          = 30;   // re-init / probe period of a failed INA or PZEM module (s)
         const uint8_t  AbortOnInitFail = 0;    // 1 = development: abort on a sensor init failure (old behavior)
         const uint16_t HeartbeatS      = 30;   // heartbeat log period (s), 0 = off (see heartbeat.h)
         const uint8_t  HeartbeatLongEvery = 5; // every N-th heartbeat also prints the extended diagnostic lines, 0 = never
     } Health;
 
     // Zigbee ZCL Reporting Rules = FIRMWARE DEFAULTS (D3/N4)
-    // Written once, on a factory-new start BEFORE the first join (a task, ~0.5 s per record, ~26 s for all 52
+    // Written once, on a factory-new start BEFORE the first join (a task, ~0.5 s per record, ~26 s for all 52 + 6 per PZEM
     // records; the steering starts after it). The coordinator (Z2M: configure on pairing, Reconfigure) overwrites
     // them afterwards, and a plain reboot never touches them. Enabled = 0: that category is left entirely to the
     // coordinator (its records stay at the stack default until the coordinator configures them).
@@ -137,6 +148,19 @@ struct AppConfig {
             };
         } Dc;
 
+        struct {                            // PZEM-004T AC meters (Config.Zigbee.Pzem): 6 records per module (V, I, P, f, PF, E)
+            const uint8_t  Enabled = 1;
+            const uint16_t MaxInterval = 60;
+            const uint16_t MinInterval = 5;
+            // Reportable changes in physical units (raw units follow the ZCL_AC_DIV_* divisors, zcl_values.h)
+            const float   ThresholdVolt   = 1.0f;     // V
+            const float   ThresholdCur    = 0.05f;    // A
+            const float   ThresholdPwr    = 2.0f;     // W
+            const float   ThresholdFreq   = 0.2f;     // Hz
+            const uint8_t ThresholdPf     = 5;        // percent points
+            const float   ThresholdEnergy = 0.010f;   // kWh (10 Wh)
+        } Pzem;
+
         struct {                            // fault indication: Binary Input (EP 1) + 0xFC11 fault mask
             const uint8_t  Enabled = 1;
             const uint16_t MaxInterval = 3600;
@@ -159,6 +183,26 @@ struct AppConfig {
             { LP_I2C_NUM_0, { GPIO_NUM_6,  GPIO_NUM_7  }, 100000 }
         };
     } I2C;
+
+    // UART Bus Configuration (same structure as the I2C buses: the number of buses, per bus the port and the pins)
+    // The pins go through the GPIO matrix, so any free GPIO works. NOT GPIO16/17 (UART0 default pins: serial download /
+    // boot log, a connected module can disturb flashing), not the strapping pins (4, 5, 8, 9, 15), not USB (12, 13).
+    // The port must not be the console UART (checked at the init, log "InitBus"). The pins are also checked against
+    // the I2C, DHT, button and error indication pins. GPIO2/3: free on the ESP32-C6 SuperMini (check the pinout file).
+    struct {
+        const uint8_t Count = n_UART;
+        struct BusDef {
+            uart_port_t port;
+            struct PinDef {
+                gpio_num_t tx;
+                gpio_num_t rx;
+            } pin;
+            const uint32_t Baud;          // 8N1; PZEM-004T v3: 9600
+            const uint16_t RxBufBytes;    // driver RX ring buffer (> the hardware FIFO of 128 bytes)
+        } bus[n_UART] = {
+            { UART_NUM_1, { GPIO_NUM_2, GPIO_NUM_3 }, 9600, 256 }
+        };
+    } UART;
 
     // Physical Sensor Settings
     struct {
@@ -196,6 +240,20 @@ struct AppConfig {
                 {0.01f,  0.02f,  0.01f},    // INA5: BTR 0 (2x0.02), BTR 1 (TEMPORARY 1x0.02, 8.2 A), CHARGER (2x0.02); 16.4 A / 8.2 A / 16.4 A
             };
         } Ina;
+
+        struct {
+            const uint8_t Count = n_PZEM;
+            struct ModDef {
+                const uint8_t bus;         // index of Config.UART.bus[]
+                const uint8_t addr;        // Modbus-RTU slave address (PZEM_ADDR_DEFAULT = 0x01 factory default, unique per bus)
+            };
+            // Modules on the UART buses. Several modules can share a bus (addresses must differ: set them one by one,
+            // module by module, with the other modules disconnected). Zigbee endpoints: Config.Zigbee.Pzem.
+            const ModDef module[n_PZEM] = {
+                { 0, PZEM_ADDR_DEFAULT },     // PZEM 0 (AC mains side of the charger / PSU)
+            };
+            const uint16_t TimeoutMs = 300;   // wait for the first byte of the answer (the module answers in ~30-80 ms)
+        } Pzem;
 
         struct {
             const int MinTemp = -10;   // °C, a tsens mérési tartomány alja
@@ -237,9 +295,22 @@ struct AppConfig {
                 {0x20, 0x21, 0x22},
             };
         } Ina;
+
+        struct {
+            // Electrical Measurement (AC: voltage, current, active power, frequency, power factor) + Metering (energy)
+            const uint8_t Endpoints[n_PZEM] = { 0x30 };
+        } Pzem;
     } Zigbee;
 };
 extern const AppConfig Config;
+
+// The fault bit map has room for: 7 DHT (bits 1..7), 5 INA (8..12), 3 PZEM (13..15) sensor flags and 3 I2C (bits 1..3),
+// 3 UART (bits 5..7) bus flags (health.h). A larger count needs a new bit map (health.h, converter FAULT_BITS).
+static_assert(n_DHT <= 7, "health.h: HF_SENS_DHT(i) has bits 1..7");
+static_assert(n_INA <= 5, "health.h: HF_SENS_INA(i) has bits 8..12");
+static_assert(n_PZEM <= 3, "health.h: HF_SENS_PZEM(i) has bits 13..15");
+static_assert(n_I2C <= 3, "health.h: HF_BUS_I2C(b) has bits 1..3");
+static_assert(n_UART <= 3, "health.h: HF_BUS_UART(b) has bits 5..7");
 
 // ******** Log macros per topic ********
 // LOG<level>_<TOPIC>(format, ...) = ESP_LOG<level>(Config.Logging.Tag<Topic>, format, ...). The tag text comes from
@@ -280,3 +351,7 @@ extern const AppConfig Config;
 #define LOGW_INADIAG(...)      ESP_LOGW(Config.Logging.TagInaDiag, __VA_ARGS__)
 #define LOGI_INADIAG(...)      ESP_LOGI(Config.Logging.TagInaDiag, __VA_ARGS__)
 #define LOGD_INADIAG(...)      ESP_LOGD(Config.Logging.TagInaDiag, __VA_ARGS__)
+#define LOGE_PZEMDIAG(...)     ESP_LOGE(Config.Logging.TagPzemDiag, __VA_ARGS__)
+#define LOGW_PZEMDIAG(...)     ESP_LOGW(Config.Logging.TagPzemDiag, __VA_ARGS__)
+#define LOGI_PZEMDIAG(...)     ESP_LOGI(Config.Logging.TagPzemDiag, __VA_ARGS__)
+#define LOGD_PZEMDIAG(...)     ESP_LOGD(Config.Logging.TagPzemDiag, __VA_ARGS__)

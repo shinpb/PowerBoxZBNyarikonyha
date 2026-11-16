@@ -12,6 +12,7 @@ const AppConfig Config;
 #include "health.h"
 #include "heartbeat.h"
 #include "sensor_manager.h"
+#include "uart_bus.h"
 #include "zigbee_manager.h"
 #include "button.h"
 
@@ -64,6 +65,12 @@ extern "C" void app_main() {
     LOGI_INIT_SENSOR("Init INA sensors");
     init_sensors_ina();
 
+    LOGI_INIT_BUS("Init UART buses");
+    init_uart_buses();
+
+    LOGI_INIT_SENSOR("Init PZEM sensors");
+    init_sensors_pzem();
+
     // Bus and sensor units are up (init failures are already flagged individually)
     health_clear(HM_BUS, HF_STARTING);
     health_clear(HM_SENSOR, HF_STARTING);
@@ -71,6 +78,11 @@ extern "C" void app_main() {
     if (Config.Logging.InaDiag) {
         LOGI_INIT_SENSOR("ina_diag()");
         ina_diag();
+    }
+
+    if (Config.Logging.PzemDiag) {
+        LOGI_INIT_SENSOR("pzem_diag()");
+        pzem_diag();
     }
 
     if (Config.Zigbee.Disabled) {

@@ -8,6 +8,7 @@
 #include "esp_zigbee.h"
 #include "ezbee/zha.h"
 #include "ezbee/zcl/cluster/binary_input.h"
+#include "ezbee/zcl/cluster/metering.h"
 #include "ina3221.h"        // INA3221_BUS_NUMBER
 // Internal components
 #include "zigbee_reporting.h"
@@ -17,7 +18,7 @@
 
 // ---- Firmware default reporting (D3/N4, Config.Reporting) ----
 // Written ONCE, on a factory-new start before the first join, by reporting_defaults_task (below). One update takes
-// ~0.5 s (all 52 records: ~26 s), too long for the signal handler, so the task takes the Zigbee lock for every single
+// ~0.5 s (all 52 + 6 per PZEM records: ~26 s), too long for the signal handler, so the task takes the Zigbee lock for every single
 // call and releases it between the records. After the join the coordinator (Z2M configure) overwrites the values.
 static unsigned s_def_ok = 0, s_def_missing = 0;
 
@@ -46,7 +47,8 @@ static void set_default_report(const char *name, uint8_t ep, uint16_t cluster, u
 static int16_t scaled_s16(float v, float mul) { return (int16_t)lroundf(v * mul); }
 
 // ---- The list of reportable attributes (single definition, used by the defaults and by the Default Response off) ----
-enum rec_kind_t { RK_BOARD, RK_DHT_T, RK_DHT_H, RK_DC_V, RK_DC_I, RK_DC_P, RK_FAULT, RK_FAULT_MASK };
+enum rec_kind_t { RK_BOARD, RK_DHT_T, RK_DHT_H, RK_DC_V, RK_DC_I, RK_DC_P, RK_FAULT, RK_FAULT_MASK,
+                  RK_PZEM_V, RK_PZEM_I, RK_PZEM_P, RK_PZEM_F, RK_PZEM_PF, RK_PZEM_E };
 
 struct rec_t {
     const char *name;
@@ -58,7 +60,10 @@ struct rec_t {
     uint8_t     ch  = 0;
 };
 
-// Calls f(const rec_t &) for every reportable attribute of the device (52 records: board 1 + fault 2 + DHT 2x2 + DC 15x3).
+// Calls f(const rec_t &) for every reportable attribute of the device (52 records: board 1 + fault 2 + DHT 2x2 + DC 15x3,
+// + 6 per PZEM module: V, I, P, f, PF, energy). PowerFactor and Metering CurrentSummationDelivered are created read-only
+// by the stack: zigbee_endpoints.cpp (make_reportable) adds the Reporting flag, otherwise a Configure Reporting is answered with
+// UNREPORTABLE_ATTRIBUTE (0x8C).
 template <typename F>
 static void for_each_record(F &&f)
 {
@@ -82,6 +87,21 @@ static void for_each_record(F &&f)
             f(rec_t{"dc P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
                     EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_DC_POWER_ID, RK_DC_P, (uint8_t)i, (uint8_t)ch});
         }
+    }
+    for (int i = 0; i < Config.Sensor.Pzem.Count; i++) {
+        const uint8_t ep = Config.Zigbee.Pzem.Endpoints[i];
+        f(rec_t{"pzem V", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_VOLTAGE_ID, RK_PZEM_V});
+        f(rec_t{"pzem I", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_RMS_CURRENT_ID, RK_PZEM_I});
+        f(rec_t{"pzem P", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_ACTIVE_POWER_ID, RK_PZEM_P});
+        f(rec_t{"pzem f", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_AC_FREQUENCY_ID, RK_PZEM_F});
+        f(rec_t{"pzem PF", ep, EZB_ZCL_CLUSTER_ID_ELECTRICAL_MEASUREMENT,
+                EZB_ZCL_ATTR_ELECTRICAL_MEASUREMENT_POWER_FACTOR_ID, RK_PZEM_PF});
+        f(rec_t{"pzem E", ep, EZB_ZCL_CLUSTER_ID_METERING,
+                EZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID, RK_PZEM_E});
     }
     f(rec_t{"fault", ep_b, EZB_ZCL_CLUSTER_ID_BINARY_INPUT,
             EZB_ZCL_ATTR_BINARY_INPUT_PRESENT_VALUE_ID, RK_FAULT});
@@ -123,6 +143,22 @@ static bool report_params(const rec_t &r, uint16_t &min_s, uint16_t &max_s, ezb_
             else if (kind == RK_DC_I) delta.s16 = scaled_s16(th.Cur, ZCL_DC_DIV_I);
             else                      delta.s16 = scaled_s16(th.Pwr, ZCL_DC_DIV_P);
         }
+        return true;
+    case RK_PZEM_V:
+    case RK_PZEM_I:
+    case RK_PZEM_P:
+    case RK_PZEM_F:
+    case RK_PZEM_PF:
+    case RK_PZEM_E:
+        if (!RP.Pzem.Enabled) return false;
+        min_s = RP.Pzem.MinInterval; max_s = RP.Pzem.MaxInterval;
+        // raw units follow the divisors of the PZEM endpoints (ZCL_AC_DIV_*, ZCL_METER_DIV_E), the delta has the attribute's type
+        if (kind == RK_PZEM_V)       delta.u16 = (uint16_t)lroundf(RP.Pzem.ThresholdVolt * ZCL_AC_DIV_V);
+        else if (kind == RK_PZEM_I)  delta.u16 = (uint16_t)lroundf(RP.Pzem.ThresholdCur * ZCL_AC_DIV_I);
+        else if (kind == RK_PZEM_P)  delta.s16 = scaled_s16(RP.Pzem.ThresholdPwr, ZCL_AC_DIV_P);
+        else if (kind == RK_PZEM_F)  delta.u16 = (uint16_t)lroundf(RP.Pzem.ThresholdFreq * ZCL_AC_DIV_F);
+        else if (kind == RK_PZEM_PF) delta.s8  = (int8_t)RP.Pzem.ThresholdPf;
+        else                         delta.u48 = (uint64_t)lroundf(RP.Pzem.ThresholdEnergy * ZCL_METER_DIV_E);
         return true;
     case RK_FAULT:
     case RK_FAULT_MASK:
@@ -198,7 +234,7 @@ bool zb_start_reporting_defaults()
     static bool started = false;
     const auto &RP = Config.Reporting;
     if (started) return !s_defaults_done;   // still running: it starts the steering; already done: the caller must
-    if (!RP.Enabled || !(RP.Board.Enabled || RP.Dht.Enabled || RP.Dc.Enabled || RP.Fault.Enabled)) {
+    if (!RP.Enabled || !(RP.Board.Enabled || RP.Dht.Enabled || RP.Dc.Enabled || RP.Pzem.Enabled || RP.Fault.Enabled)) {
         LOGI_REP("Firmware default reporting is off (config)");
         return false;
     }

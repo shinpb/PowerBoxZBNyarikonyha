@@ -36,6 +36,11 @@ static void dc_task_cycle(bool pre_start) {
     zb_publish_fault(pre_start);
 }
 
+static void pzem_task_cycle(bool pre_start) {
+    pzem_cycle(pre_start);
+    zb_publish_fault(pre_start);
+}
+
 static void dht_measurement_task(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.DhtMs);
@@ -69,10 +74,27 @@ static void dc_measurement_task(void *pvParameters) {
     }
 }
 
+static void pzem_measurement_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(Config.Measurement.PzemMs);
+
+    if (s_pre_measured) {
+        vTaskDelay(xFrequency);
+        xLastWakeTime = xTaskGetTickCount();
+    }
+    while (true) {
+        int64_t t0 = esp_timer_get_time();
+        pzem_task_cycle(false);
+        cycle_stat(g_diag.pzem_cycle_last_ms, g_diag.pzem_cycle_max_ms, &g_diag.pzem_overruns, t0, Config.Measurement.PzemMs);
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
 void measure_all_once() {
     if (s_tasks_started) return;   // a repeated start signal of the stack must not read the sensors next to the tasks
     dht_task_cycle(true);
     dc_task_cycle(true);
+    pzem_task_cycle(true);
     s_pre_measured = true;
 }
 
@@ -82,5 +104,6 @@ void start_measurement_tasks() {
     LOGI_SETUP("Starting measurement tasks");
     xTaskCreate(dht_measurement_task, "Task_DHT", Config.Tasks.MeasDht.Stack, NULL, Config.Tasks.MeasDht.Prio, NULL);
     xTaskCreate(dc_measurement_task,  "Task_DC",  Config.Tasks.MeasDc.Stack, NULL, Config.Tasks.MeasDc.Prio, NULL);
+    xTaskCreate(pzem_measurement_task, "Task_PZEM", Config.Tasks.MeasPzem.Stack, NULL, Config.Tasks.MeasPzem.Prio, NULL);
 }
 

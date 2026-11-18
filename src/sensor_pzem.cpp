@@ -85,6 +85,26 @@ static pzem_err_t pzem_read_input(int idx, uint16_t *regs, uint8_t *exc) {
                          PZEM_REG_INPUT_START, PZEM_REG_INPUT_COUNT, regs, exc);
 }
 
+// Reset-energy request (0x42): ERASES the module's energy counter.
+static pzem_err_t pzem_reset_energy(int idx, uint8_t *exc) {
+    const auto &M = Config.Sensor.Pzem.module[idx];
+    uint8_t tx[PZEM_RESET_LEN];
+    uint8_t rx[PZEM_MAX_RESP];
+    const size_t tx_len = pzem_build_reset(tx, M.addr);
+    size_t got = 0;
+    if (Config.Logging.PzemRaw) raw_dump(idx, "TX", tx, tx_len);
+    const esp_err_t e = uart_bus_transfer(M.bus, tx, tx_len, rx, sizeof rx, PZEM_RESET_LEN, Config.Sensor.Pzem.TimeoutMs, &got);
+    if (Config.Logging.PzemRaw && got > 0) raw_dump(idx, "RX", rx, got);
+    if (e == ESP_ERR_TIMEOUT) return PZEM_E_TIMEOUT;
+    if (e != ESP_OK) return PZEM_E_BUS;
+    switch (pzem_parse_reset(rx, got, M.addr, exc)) {
+    case PZEM_PARSE_OK:        return PZEM_E_OK;
+    case PZEM_PARSE_CRC:       return PZEM_E_CRC;
+    case PZEM_PARSE_EXCEPTION: return PZEM_E_EXCEPTION;
+    default:                   return PZEM_E_FRAME;
+    }
+}
+
 // Per module error counters (heartbeat "pzem ok/tmo/crc/proto")
 static void pzem_count(int idx, pzem_err_t e) {
     switch (e) {
@@ -153,6 +173,51 @@ static void pzem_update_health() {
 }
 #endif
 
+// ---- energy counter reset (Zigbee trigger, Config.Sensor.Pzem.EnergyReset) ----
+static volatile bool s_reset_req[n_PZEM] = {false};
+#ifdef DUMMY_SENSOR_MODE
+static double s_dummy_e_wh[n_PZEM] = {0};
+#endif
+
+// Zigbee stack context: only remember the request (the Modbus transfer takes up to Config.Sensor.Pzem.TimeoutMs).
+void pzem_request_energy_reset(uint8_t ep) {
+    for (int idx = 0; idx < Config.Sensor.Pzem.Count; idx++) {
+        if (Config.Zigbee.Pzem.Endpoints[idx] != ep) continue;
+        if (Config.Sensor.Pzem.EnergyReset == 0) {
+            LOGW_MEAS("PZEM %d: energy reset trigger ignored (Config.Sensor.Pzem.EnergyReset = 0)", idx);
+        }
+        s_reset_req[idx] = true;
+        return;
+    }
+}
+
+// Measurement task: handle a pending request, then set the trigger attribute back to 0.
+static void pzem_handle_reset(int idx, bool pre_start) {
+    if (!s_reset_req[idx] || pre_start) return;
+    s_reset_req[idx] = false;
+    const uint8_t ep = Config.Zigbee.Pzem.Endpoints[idx];
+    const uint8_t mode = Config.Sensor.Pzem.EnergyReset;
+    if (mode == 1) {
+        LOGW_MEAS("PZEM %d: energy reset requested over Zigbee, NOT executed (Config.Sensor.Pzem.EnergyReset = 1: log only)", idx);
+    } else if (mode >= 2) {
+#ifndef DUMMY_SENSOR_MODE
+        if (!s_pzem_cfg_ok[idx] || !s_pzem_ok[idx]) {
+            LOGW_MEAS("PZEM %d: energy reset requested, but the module is offline: not executed", idx);
+        } else {
+            uint8_t exc = 0;
+            const pzem_err_t pe = pzem_reset_energy(idx, &exc);
+            pzem_count(idx, pe);
+            if (pe == PZEM_E_OK) LOGW_MEAS("PZEM %d: energy counter RESET (Modbus 0x42 acknowledged)", idx);
+            else LOGW_MEAS("PZEM %d: energy reset failed: %s", idx, pzem_err_name(pe));
+        }
+#else
+        s_dummy_e_wh[idx] = 0;
+        LOGW_MEAS("PZEM %d: energy counter reset (dummy mode)", idx);
+#endif
+    }
+    zb_clear_pzem_energy_reset(ep, pre_start);
+}
+
 void init_sensors_pzem() {
 #ifndef DUMMY_SENSOR_MODE
     const uint8_t thr = Config.Health.FailThreshold;
@@ -186,6 +251,7 @@ void init_sensors_pzem() {
 void pzem_cycle(bool pre_start) {
     for (int idx = 0; idx < Config.Sensor.Pzem.Count; idx++) {
         const uint8_t ep = Config.Zigbee.Pzem.Endpoints[idx];
+        pzem_handle_reset(idx, pre_start);
         pzem_meas_t m = {};
         bool ok = false;
         bool publish = true;
@@ -239,17 +305,16 @@ void pzem_cycle(bool pre_start) {
 #else
         // simulated values: 230 V / 50 Hz mains, a slowly varying load, the energy integrates the power
         static float tick_ac = 0.0f;
-        static double e_wh[n_PZEM] = {0};
         tick_ac += 0.1f;
         const float v  = 230.0f + 2.0f * sinf(tick_ac + (float)idx);
         const float i  = 1.5f + 0.5f * cosf(tick_ac + (float)idx);
         const float pf = 0.92f;
         const float p  = v * i * pf;
-        e_wh[idx] += (double)p * ((double)Config.Measurement.PzemMs / 1000.0) / 3600.0;
+        s_dummy_e_wh[idx] += (double)p * ((double)Config.Measurement.PzemMs / 1000.0) / 3600.0;
         m.voltage_dV = (uint16_t)lroundf(v * 10.0f);
         m.current_mA = (uint32_t)lroundf(i * 1000.0f);
         m.power_dW   = (uint32_t)lroundf(p * 10.0f);
-        m.energy_Wh  = (uint32_t)e_wh[idx];
+        m.energy_Wh  = (uint32_t)s_dummy_e_wh[idx];
         m.freq_dHz   = (uint16_t)lroundf((50.0f + 0.05f * sinf(tick_ac)) * 10.0f);
         m.pf_c       = (uint16_t)lroundf(pf * 100.0f);
         m.alarm      = false;

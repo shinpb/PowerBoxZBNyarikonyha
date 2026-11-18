@@ -13,6 +13,7 @@
 #include "zigbee_endpoints.h"
 #include "zcl_values.h"
 #include "config.h"
+#include "sensor_manager.h"
 
 static void add_temp_cluster(ezb_af_ep_desc_t ep_desc, float min_c, float max_c);
 static void add_diag_clusters(ezb_af_ep_desc_t ep_desc);
@@ -192,6 +193,33 @@ static void make_reportable(ezb_zcl_cluster_desc_t cluster, uint16_t attr, const
     if (e != EZB_ERR_NONE) LOGE_ZB("%s: cannot enable reporting (ret=%d)", name, (int)e);
 }
 
+static void diag_cluster_noop(uint8_t) {}
+static uint8_t pzem_energy_reset_val[n_PZEM] = {0};
+
+// Cluster 0xFC11 handlers (server role). The value is checked before it is stored; after the write only a request flag is
+// set (this runs in the Zigbee stack context): the Modbus request is sent from the measurement task (pzem_request_energy_reset).
+static ezb_zcl_status_t diag_cluster_check_value(uint16_t attr_id, uint8_t ep_id, void *value) {
+    if (attr_id == ZB_DIAG_ATTR_ENERGY_RESET) {
+        const uint8_t v = *(const uint8_t *)value;
+        return (v <= 1) ? EZB_ZCL_STATUS_SUCCESS : EZB_ZCL_STATUS_INVALID_VALUE;
+    }
+    return EZB_ZCL_STATUS_SUCCESS;
+}
+
+static void diag_cluster_write_attr(uint8_t ep_id, uint16_t attr_id, void *new_value, uint16_t manuf_code) {
+    if (attr_id == ZB_DIAG_ATTR_ENERGY_RESET && *(const uint8_t *)new_value == 1) pzem_request_energy_reset(ep_id);
+}
+
+static void register_diag_cluster_handlers() {
+    ezb_zcl_custom_cluster_handlers_t h = {};
+    h.cluster_id     = ZB_DIAG_CLUSTER_ID;
+    h.cluster_role   = EZB_ZCL_CLUSTER_SERVER;
+    h.check_value_cb = diag_cluster_check_value;
+    h.write_attr_cb  = diag_cluster_write_attr;
+    const ezb_err_t r = ezb_zcl_custom_cluster_handlers_register(&h);
+    if (r != EZB_ERR_NONE) LOGW_ZB("diag cluster handlers register ret=%d", (int)r);
+}
+
 static void init_zb_ep_pzem(ezb_af_device_desc_t dev_desc) {
     for (int idx = 0; idx < Config.Sensor.Pzem.Count; idx++) {
         const uint8_t ep = Config.Zigbee.Pzem.Endpoints[idx];
@@ -246,6 +274,19 @@ static void init_zb_ep_pzem(ezb_af_device_desc_t dev_desc) {
         make_reportable(mt, EZB_ZCL_ATTR_METERING_CURRENT_SUMMATION_DELIVERED_ID, "PZEM energy");
         ezb_af_endpoint_add_cluster_desc(cluster_list, mt);
 
+        // Manufacturer-specific cluster 0xFC11: energy counter reset trigger (read/write uint8, write 1 = reset)
+        ezb_zcl_custom_cluster_config_t cc_cfg = {
+            .cluster_id  = ZB_DIAG_CLUSTER_ID,
+            .init_func   = diag_cluster_noop,
+            .deinit_func = diag_cluster_noop,
+        };
+        ezb_zcl_cluster_desc_t cc = ezb_zcl_custom_create_cluster_desc(&cc_cfg, EZB_ZCL_CLUSTER_SERVER);
+        pzem_energy_reset_val[idx] = 0;
+        const ezb_err_t r = ezb_zcl_custom_cluster_desc_add_attr(cc, ZB_DIAG_ATTR_ENERGY_RESET, EZB_ZCL_ATTR_TYPE_UINT8,
+                                                                 EZB_ZCL_ATTR_ACCESS_READ_WRITE, &pzem_energy_reset_val[idx]);
+        if (r != EZB_ERR_NONE) LOGW_ZB("PZEM %d energy reset attribute add ret=%d", idx, (int)r);
+        ezb_af_endpoint_add_cluster_desc(cluster_list, cc);
+
         ezb_af_device_add_endpoint_desc(dev_desc, cluster_list);
     }
 }
@@ -272,7 +313,7 @@ static void init_zb_ep_board(ezb_af_device_desc_t dev_desc) {
     ezb_af_device_add_endpoint_desc(dev_desc, cluster_list);
 }
 
-static void diag_cluster_noop(uint8_t) {}
+
 
 // Device fault indication for the coordinator (4.8)
 static void add_diag_clusters(ezb_af_ep_desc_t ep_desc) {
@@ -312,4 +353,5 @@ void zb_build_endpoints(ezb_af_device_desc_t dev_desc) {
 
     LOGI_ZB("Init Zigbee PZEM endpoints");
     init_zb_ep_pzem(dev_desc);
+    if (Config.Sensor.Pzem.Count > 0) register_diag_cluster_handlers();
 }

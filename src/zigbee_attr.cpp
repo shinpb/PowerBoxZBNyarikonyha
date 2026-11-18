@@ -77,6 +77,14 @@ bool zb_write_pzem(uint8_t ep, const pzem_zcl_t &z, bool pre_start) {
     return true;
 }
 
+void zb_clear_pzem_energy_reset(uint8_t ep, bool pre_start) {
+    if (!zb_write_allowed(pre_start)) return;
+    uint8_t v = 0;
+    zb_lock(pre_start);
+    ZB_SET(ep, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_ENERGY_RESET, &v);
+    zb_unlock(pre_start);
+}
+
 // 4.8: device fault indication on the board endpoint (Binary Input + fault mask attribute).
 // Called at the end of every measurement cycle; writes only when the mask changed (under the Zigbee lock
 // so the two measurement tasks cannot interleave their compare/write).

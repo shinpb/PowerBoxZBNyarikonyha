@@ -19,6 +19,9 @@ void board_cycle(bool pre_start);
 void dht_cycle(bool pre_start);
 void ina_cycle(bool pre_start);
 void pzem_cycle(bool pre_start);
+// Energy reset request of the PZEM module on Zigbee endpoint `ep` (called from the Zigbee stack context: only sets a flag,
+// the Modbus request is sent from the measurement task, see Config.Sensor.Pzem.EnergyReset).
+void pzem_request_energy_reset(uint8_t ep);
 
 // ---- tasks ----
 void start_measurement_tasks();

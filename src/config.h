@@ -253,6 +253,10 @@ struct AppConfig {
                 { 0, PZEM_ADDR_DEFAULT },     // PZEM 0 (AC mains side of the charger / PSU)
             };
             const uint16_t TimeoutMs = 300;   // wait for the first byte of the answer (the module answers in ~30-80 ms)
+            // Energy counter reset (Zigbee: attribute ZB_DIAG_ATTR_ENERGY_RESET of cluster 0xFC11 on the PZEM endpoint, write 1).
+            // The Modbus reset (function 0x42) ERASES the module's own counter permanently.
+            //   0 = ignore the trigger, 1 = log the request only (first test: nothing is sent to the module), 2 = execute
+            const uint8_t EnergyReset = 1;
         } Pzem;
 
         struct {

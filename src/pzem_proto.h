@@ -23,6 +23,7 @@
 
 #define PZEM_FN_READ_HOLDING 0x03
 #define PZEM_FN_READ_INPUT   0x04
+#define PZEM_FN_RESET_ENERGY 0x42   // reset the energy counter (request [addr][0x42][crc], the answer repeats the request)
 
 #define PZEM_REG_INPUT_START 0x0000
 #define PZEM_REG_INPUT_COUNT 10
@@ -94,6 +95,35 @@ static inline pzem_parse_t pzem_parse_read(const uint8_t *rx, size_t got, uint8_
     if (!addr_any && rx[0] != addr) return PZEM_PARSE_ADDR;
     if (rx[1] != fn || rx[2] != (uint8_t)(2u * count)) return PZEM_PARSE_FORMAT;
     for (uint16_t i = 0; i < count; i++) regs[i] = (uint16_t)(((uint16_t)rx[3 + 2 * i] << 8) | rx[4 + 2 * i]);
+    return PZEM_PARSE_OK;
+}
+
+// Reset-energy request (function 0x42) into buf[PZEM_RESET_LEN]; returns the frame length.
+#define PZEM_RESET_LEN       4
+static inline size_t pzem_build_reset(uint8_t *buf, uint8_t addr) {
+    buf[0] = addr;
+    buf[1] = PZEM_FN_RESET_ENERGY;
+    const uint16_t crc = pzem_crc16(buf, 2);
+    buf[2] = (uint8_t)(crc & 0xFF);
+    buf[3] = (uint8_t)(crc >> 8);
+    return PZEM_RESET_LEN;
+}
+
+// Parses the answer of a reset-energy request: the normal answer repeats the 4 byte request, an error answer is the
+// 5 byte exception frame [addr][0xC2][code][crc]. PZEM_PARSE_OK / _EXCEPTION (code in *exc) / _CRC / _ADDR / _FORMAT / _SHORT.
+static inline pzem_parse_t pzem_parse_reset(const uint8_t *rx, size_t got, uint8_t addr, uint8_t *exc) {
+    if (got >= 5 && rx[1] == (uint8_t)(PZEM_FN_RESET_ENERGY | 0x80)) {
+        const uint16_t crc = pzem_crc16(rx, 3);
+        if (rx[3] != (uint8_t)(crc & 0xFF) || rx[4] != (uint8_t)(crc >> 8)) return PZEM_PARSE_CRC;
+        if (rx[0] != addr) return PZEM_PARSE_ADDR;
+        if (exc) *exc = rx[2];
+        return PZEM_PARSE_EXCEPTION;
+    }
+    if (got < PZEM_RESET_LEN) return PZEM_PARSE_SHORT;
+    const uint16_t crc = pzem_crc16(rx, 2);
+    if (rx[2] != (uint8_t)(crc & 0xFF) || rx[3] != (uint8_t)(crc >> 8)) return PZEM_PARSE_CRC;
+    if (rx[0] != addr) return PZEM_PARSE_ADDR;
+    if (rx[1] != PZEM_FN_RESET_ENERGY) return PZEM_PARSE_FORMAT;
     return PZEM_PARSE_OK;
 }
 

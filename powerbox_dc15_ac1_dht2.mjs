@@ -51,6 +51,9 @@ const INA_EPS = [
 
 // PZEM modules: properties voltage_pzem1, current_pzem1, power_pzem1, ac_frequency_pzem1, power_factor_pzem1, energy_pzem1
 const PZEM_ENDPOINTS = {pzem1: 0x30};
+// Energy counter reset: write 1 to this uint8 attribute of the manufacturer-specific cluster (DIAG_CLUSTER) on the PZEM endpoint;
+// the firmware resets the module's counter (if Config.Sensor.Pzem.EnergyReset = 2) and sets the attribute back to 0.
+const DIAG_ATTR_ENERGY_RESET = 0x0010;
 
 // names like ina1ch1 .. ina5ch3  ->  properties voltage_ina1ch1, current_ina1ch1, power_ina1ch1
 const DC_ENDPOINTS = {};
@@ -285,10 +288,20 @@ for (const name of Object.keys(PZEM_ENDPOINTS)) {
         exposes.numeric('ac_frequency', exposes.access.STATE).withUnit('Hz').withDescription('Mains frequency').withEndpoint(name),
         exposes.numeric('power_factor', exposes.access.STATE).withDescription('Power factor (0..1)').withEndpoint(name),
         exposes.numeric('energy', exposes.access.STATE).withUnit('kWh').withDescription('Energy counter of the PZEM module').withEndpoint(name),
+        exposes.enum('energy_reset', exposes.access.SET, ['reset']).withDescription('Resets the energy counter of the PZEM module to 0 (cannot be undone)').withEndpoint(name),
     );
 }
 
 // ---------------------------------------------------------------- definition
+const tzEnergyReset = {
+    key: ['energy_reset'],
+    convertSet: async (entity, key, value, meta) => {
+        if (value !== 'reset') throw new Error(`energy_reset: unsupported value '${value}' (use 'reset')`);
+        await entity.write(DIAG_CLUSTER, {energyReset: 1});
+        return {};   // no state: the trigger is a command, not a value
+    },
+};
+
 const definition = {
     zigbeeModel: ['PowerBox-DC15-AC1-DHT2'],
     model: 'PowerBox-DC15-AC1-DHT2',
@@ -302,6 +315,7 @@ const definition = {
             name: DIAG_CLUSTER,
             attributes: {
                 faultMask: {name: 'faultMask', ID: DIAG_ATTR_FAULT_MASK, type: Zcl.DataType.BITMAP32},
+                energyReset: {name: 'energyReset', ID: DIAG_ATTR_ENERGY_RESET, type: Zcl.DataType.UINT8},
             },
             commands: {},
             commandsResponse: {},
@@ -311,7 +325,7 @@ const definition = {
     ],
 
     fromZigbee: [fzDcMeasurement, fzAcMeasurement, fzEnergy, fzFault, fzFaultMask],
-    toZigbee: [tzFault],
+    toZigbee: [tzFault, tzEnergyReset],
     exposes: dcExposes,
 
     // bind + reporting for the 15 DC endpoints (DHT is configured by the modernExtend above)

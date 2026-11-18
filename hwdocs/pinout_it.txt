@@ -1,6 +1,8 @@
  - ESP36-C6 Supermini:
    - GND: GND
    - 3V3: 3V3
+   - 2: UART_1_TX
+   - 3: UART_1_RX (330 Ohm series resistor from the UART_1_RX bus line)
    - 20: DHT1_DATA
    - 19: DHT2_DATA
    - 22: I2C_0_SCL
@@ -33,3 +35,15 @@
    - out:
      - 0: DHT1_DATA
      - 1: DHT2_DATA
+
+ - UART_1 bus (Modbus-RTU, 9600 8N1; GPIO2/3, not GPIO16/17 = console/USB):
+   - UART_1_TX: ESP 2 -> RX of every PZEM (in parallel)
+   - UART_1_RX: ESP 3 via 330 Ohm; the bus line has a 10 kOhm pull-up to 3V3
+     (UART1 RX, 10 kOhm pull-up to 3V3); each PZEM TX joins it through its own BAT42
+
+ - PZEM-004T v3 [0] (external module, 4 pole connector next to the DHT connectors; Modbus address 0x01):
+   - "5V" (logic/optocoupler side): 3V3 (no level shifting needed)
+   - GND: GND
+   - RX: UART_1_TX
+   - TX: BAT42 cathode (stripe at the PZEM TX); BAT42 anode: UART_1_RX bus line
+   - further modules [1..2]: same, each with its own BAT42, RX in parallel, other Modbus address

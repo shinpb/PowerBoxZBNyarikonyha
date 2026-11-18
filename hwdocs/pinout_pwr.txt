@@ -5,13 +5,16 @@ Powerbox:
    - IN: 12V
    - OUT: FUSED12V[0..14]
  - SW [0..14]:
-   - 0: 0V (VIA Fuse 0.2)
+   - 0: 0V (VIA Fuse 0 - LED 0V, 1 A)
    - "+": FUSED12V[0..14]
    - out: SW12V[0..14]
- - DCDC UC:
+ - DCDC UC (ESP32 supply, 5 V output, ~5.2 V in practice):
    - GND: 0V
    - IN: SW12V[0]
-   - OUT: SWUC
+   - OUT: SWUC_RAW
+ - D1 (1N4001, series, reverse-feed protection of the ESP32 USB/5V pin):
+   - ANODE: SWUC_RAW
+   - CATHODE (stripe): SWUC
  - DCDC RPI:
    - GND: 0V
    - IN: SW12V[1]
@@ -26,8 +29,8 @@ Powerbox:
      - OUT_PLUS[1..14]
   - OUT_MINUS: 0V
   - ESP32-C6 Supermini:
-    - "B-": 0V
-    - "B+": UC_PLUS
+    - GND: 0V
+    - "5V" pin: UC_PLUS   (~5.2 V - ~0.7 V diode drop ~ 4.5 V at the pin)
 
 Periferials:
  - RPI:

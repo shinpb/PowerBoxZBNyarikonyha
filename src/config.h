@@ -19,6 +19,13 @@
 #define n_I2C 2
 #define n_UART 1
 #define n_PZEM 1
+// Handling of the Zigbee energy counter reset trigger of a PZEM module (Config.Sensor.Pzem.EnergyReset)
+enum PzemEnergyResetMode : uint8_t {
+    PZEM_ENERGY_RESET_IGNORE = 0,   // the trigger is ignored (only a warning is logged)
+    PZEM_ENERGY_RESET_LOG_ONLY,     // the request is logged, nothing is sent to the module (first test)
+    PZEM_ENERGY_RESET_EXECUTE,      // Modbus reset: the module's own counter is ERASED permanently
+};
+
 // Reporting thresholds of one DC channel (raw ZCL units follow the endpoint divisors, see zcl_values.h)
 struct DcReportThr {
     float Volt;   // V
@@ -253,10 +260,9 @@ struct AppConfig {
                 { 0, PZEM_ADDR_DEFAULT },     // PZEM 0 (AC mains side of the charger / PSU)
             };
             const uint16_t TimeoutMs = 300;   // wait for the first byte of the answer (the module answers in ~30-80 ms)
-            // Energy counter reset (Zigbee: attribute ZB_DIAG_ATTR_ENERGY_RESET of cluster 0xFC11 on the PZEM endpoint, write 1).
+            // Energy counter reset (Zigbee: attribute ZB_CTRL_ATTR_ENERGY_RESET of the control cluster ZB_CTRL_CLUSTER_ID (0xFC12) on the PZEM endpoint, write 1).
             // The Modbus reset (function 0x42) ERASES the module's own counter permanently.
-            //   0 = ignore the trigger, 1 = log the request only (first test: nothing is sent to the module), 2 = execute
-            const uint8_t EnergyReset = 1;
+            const PzemEnergyResetMode EnergyReset = PZEM_ENERGY_RESET_EXECUTE;
         } Pzem;
 
         struct {

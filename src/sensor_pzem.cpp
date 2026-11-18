@@ -183,8 +183,8 @@ static double s_dummy_e_wh[n_PZEM] = {0};
 void pzem_request_energy_reset(uint8_t ep) {
     for (int idx = 0; idx < Config.Sensor.Pzem.Count; idx++) {
         if (Config.Zigbee.Pzem.Endpoints[idx] != ep) continue;
-        if (Config.Sensor.Pzem.EnergyReset == 0) {
-            LOGW_MEAS("PZEM %d: energy reset trigger ignored (Config.Sensor.Pzem.EnergyReset = 0)", idx);
+        if (Config.Sensor.Pzem.EnergyReset == PZEM_ENERGY_RESET_IGNORE) {
+            LOGW_MEAS("PZEM %d: energy reset trigger ignored (EnergyReset = PZEM_ENERGY_RESET_IGNORE)", idx);
         }
         s_reset_req[idx] = true;
         return;
@@ -196,10 +196,10 @@ static void pzem_handle_reset(int idx, bool pre_start) {
     if (!s_reset_req[idx] || pre_start) return;
     s_reset_req[idx] = false;
     const uint8_t ep = Config.Zigbee.Pzem.Endpoints[idx];
-    const uint8_t mode = Config.Sensor.Pzem.EnergyReset;
-    if (mode == 1) {
-        LOGW_MEAS("PZEM %d: energy reset requested over Zigbee, NOT executed (Config.Sensor.Pzem.EnergyReset = 1: log only)", idx);
-    } else if (mode >= 2) {
+    const PzemEnergyResetMode mode = Config.Sensor.Pzem.EnergyReset;
+    if (mode == PZEM_ENERGY_RESET_LOG_ONLY) {
+        LOGW_MEAS("PZEM %d: energy reset requested over Zigbee, NOT executed (EnergyReset = PZEM_ENERGY_RESET_LOG_ONLY)", idx);
+    } else if (mode == PZEM_ENERGY_RESET_EXECUTE) {
 #ifndef DUMMY_SENSOR_MODE
         if (!s_pzem_cfg_ok[idx] || !s_pzem_ok[idx]) {
             LOGW_MEAS("PZEM %d: energy reset requested, but the module is offline: not executed", idx);

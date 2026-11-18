@@ -81,7 +81,7 @@ void zb_clear_pzem_energy_reset(uint8_t ep, bool pre_start) {
     if (!zb_write_allowed(pre_start)) return;
     uint8_t v = 0;
     zb_lock(pre_start);
-    ZB_SET(ep, ZB_DIAG_CLUSTER_ID, ZB_DIAG_ATTR_ENERGY_RESET, &v);
+    ZB_SET(ep, ZB_CTRL_CLUSTER_ID, ZB_CTRL_ATTR_ENERGY_RESET, &v);
     zb_unlock(pre_start);
 }
 

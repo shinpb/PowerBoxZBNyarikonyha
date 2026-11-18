@@ -51,9 +51,11 @@ const INA_EPS = [
 
 // PZEM modules: properties voltage_pzem1, current_pzem1, power_pzem1, ac_frequency_pzem1, power_factor_pzem1, energy_pzem1
 const PZEM_ENDPOINTS = {pzem1: 0x30};
-// Energy counter reset: write 1 to this uint8 attribute of the manufacturer-specific cluster (DIAG_CLUSTER) on the PZEM endpoint;
+// Energy counter reset: write 1 to this uint8 attribute of the manufacturer-specific control cluster (CTRL_CLUSTER) on the PZEM endpoint;
 // the firmware resets the module's counter (if Config.Sensor.Pzem.EnergyReset = 2) and sets the attribute back to 0.
-const DIAG_ATTR_ENERGY_RESET = 0x0010;
+const CTRL_CLUSTER = 'powerBoxCtrl';
+const CTRL_CLUSTER_ID = 0xFC12;
+const CTRL_ATTR_ENERGY_RESET = 0x0000;
 
 // names like ina1ch1 .. ina5ch3  ->  properties voltage_ina1ch1, current_ina1ch1, power_ina1ch1
 const DC_ENDPOINTS = {};
@@ -297,7 +299,7 @@ const tzEnergyReset = {
     key: ['energy_reset'],
     convertSet: async (entity, key, value, meta) => {
         if (value !== 'reset') throw new Error(`energy_reset: unsupported value '${value}' (use 'reset')`);
-        await entity.write(DIAG_CLUSTER, {energyReset: 1});
+        await entity.write(CTRL_CLUSTER, {energyReset: 1});
         return {};   // no state: the trigger is a command, not a value
     },
 };
@@ -315,7 +317,15 @@ const definition = {
             name: DIAG_CLUSTER,
             attributes: {
                 faultMask: {name: 'faultMask', ID: DIAG_ATTR_FAULT_MASK, type: Zcl.DataType.BITMAP32},
-                energyReset: {name: 'energyReset', ID: DIAG_ATTR_ENERGY_RESET, type: Zcl.DataType.UINT8},
+            },
+            commands: {},
+            commandsResponse: {},
+        }),
+        m.deviceAddCustomCluster(CTRL_CLUSTER, {
+            ID: CTRL_CLUSTER_ID,
+            name: CTRL_CLUSTER,
+            attributes: {
+                energyReset: {name: 'energyReset', ID: CTRL_ATTR_ENERGY_RESET, type: Zcl.DataType.UINT8, write: true},
             },
             commands: {},
             commandsResponse: {},

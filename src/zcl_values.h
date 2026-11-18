@@ -45,7 +45,9 @@ static constexpr uint8_t  ZCL_METER_FORMAT = 0x3B;   // SummationFormatting: 7 d
 //    health_zb_mask() (sensor bits 0..15, bus bits 16..23; bit map in health.h)
 static constexpr uint16_t ZB_DIAG_CLUSTER_ID      = 0xFC11;
 static constexpr uint16_t ZB_DIAG_ATTR_FAULT_MASK = 0x0000;
-// The same cluster on each PZEM endpoint carries a write-only style trigger (uint8, read/write):
-// writing 1 resets the module's energy counter (see Config.Sensor.Pzem.EnergyReset), 0 is ignored; the firmware sets the
-// attribute back to 0 after the request was handled. Not reportable, not a standard ZCL feature (manufacturer-specific cluster).
-static constexpr uint16_t ZB_DIAG_ATTR_ENERGY_RESET = 0x0010;
+// Control cluster on each PZEM endpoint (manufacturer-specific, separate from the diagnostics cluster above):
+// attribute ZB_CTRL_ATTR_ENERGY_RESET (uint8, read/write): writing 1 resets the module's energy counter
+// (see Config.Sensor.Pzem.EnergyReset), 0 is ignored; the firmware sets the attribute back to 0 after the request was
+// handled. Not reportable, not a standard ZCL feature.
+static constexpr uint16_t ZB_CTRL_CLUSTER_ID        = 0xFC12;
+static constexpr uint16_t ZB_CTRL_ATTR_ENERGY_RESET = 0x0000;

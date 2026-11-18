@@ -1,6 +1,6 @@
-// Zigbee2MQTT external converter: PowerBox-INA15-DHT2
+// Zigbee2MQTT external converter: PowerBox-DC15-AC1-DHT2
 //
-// Install: copy to <zigbee2mqtt>/data/external_converters/powerbox_ina15_dht2.mjs
+// Install: copy to <zigbee2mqtt>/data/external_converters/powerbox_dc15_ac1_dht2.mjs
 //          restart Zigbee2MQTT, then remove + re-pair the device (or use "Reconfigure").
 //
 // Endpoint map and reporting values MUST match the firmware (config.h: Config.Reporting and the endpoint tables;
@@ -290,8 +290,8 @@ for (const name of Object.keys(PZEM_ENDPOINTS)) {
 
 // ---------------------------------------------------------------- definition
 const definition = {
-    zigbeeModel: ['PowerBox-INA15-DHT2'],
-    model: 'PowerBox-INA15-DHT2',
+    zigbeeModel: ['PowerBox-DC15-AC1-DHT2'],
+    model: 'PowerBox-DC15-AC1-DHT2',
     vendor: 'DIY',
     description: '5x INA3221 (15 DC channels: V/I/P) + 2x DHT temperature/humidity + PZEM-004T AC meter (ESP32-C6)',
 

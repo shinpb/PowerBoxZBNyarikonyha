@@ -31,7 +31,7 @@ struct AppConfig {
     struct {
         // ZCL Strings MUST be length-prefixed.
         const char Manufacturer[11] = "\x09" "Espressif";
-        const char Model[21] = "\x13" "PowerBox-INA15-DHT2";
+        const char Model[24] = "\x16" "PowerBox-DC15-AC1-DHT2";   // 22 characters (length byte 0x16); the Z2M zigbeeModel must be identical
         uint8_t PowerSource = EZB_ZCL_BASIC_POWER_SOURCE_DC_SOURCE;
         // ZCL Basic version attributes (uint8_t, application-defined, free to choose)
         uint8_t AppVersion   = 1;   // ApplicationVersion (0x0001)

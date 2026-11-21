@@ -58,7 +58,7 @@ struct AppConfig {
         const TaskDef ZigbeeMain      = { 8192,  5 };   // "Zigbee_main"
         const TaskDef ReportDefaults  = { 4096,  3 };   // "Rep_defaults" (one-shot)
         const TaskDef MeasDht         = { 4096,  1 };   // "Task_DHT" (DHT + board temperature)
-        const TaskDef MeasDc          = { 4096,  1 };   // "Task_DC"
+        const TaskDef MeasDc          = { 6144,  1 };   // "Task_DC"
         const TaskDef MeasPzem        = { 4096,  1 };   // "Task_PZEM" (Modbus polling of the PZEM modules)
         const TaskDef Heartbeat       = { 4096,  1 };   // "Task_HB"
         const TaskDef Button          = { 2048,  1 };   // "Task_Button"

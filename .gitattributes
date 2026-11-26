@@ -1,0 +1,18 @@
+# Szöveges fájlok: LF a repóban és a munkakönyvtárban is (git a Windows-os beállítástól függetlenül ezt használja)
+* text=auto eol=lf
+
+# Windows-parancsfájlok CRLF-et igényelnek
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Bináris fájlok, nincs sorvég-konverzió
+*.pdf binary
+*.png binary
+*.jpg binary
+*.bin binary
+*.elf binary
+*.zip binary
+
+# VSCode
+.vscode/extensions.json text eol=crlf

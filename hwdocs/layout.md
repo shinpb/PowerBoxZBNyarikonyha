@@ -23,7 +23,7 @@ Használható belső méret: 190 × 145 mm, 4 sarokban 13 × 13 mm csavarhely. F
 ## Fedél (elölnézet)
 - Piros busbar (12 V) 88 × 13, x 51–139, y 4,5–17,5; a fedélsík alá 14 mm-re benyúlik.
 - 15 biztosítéktartó, 9,5 mm osztás, y 31,5–58,5; felső fül → piros busbar, alsó fül → a kapcsoló bemenete. Kötési zónák: felül 8 mm (23,5–31,5, a busbar 6 mm-es zónájával határos), alul 8 mm (58,5–66,5).
-- Biztosítéksor jobb szélén, 6 mm elválasztással: a LED 0 V biztosítéka (külön színnel), **1 A** (a 15 kapcsoló világítása ~50 mA/db, összesen ~750 mA; a korábbi 0,5 A nem elég).
+- Biztosítéksor jobb szélén, 6 mm elválasztással: a LED 0 V biztosítéka (külön színnel), **T 1 A** (a 15 kapcsoló világítása ~50 mA/db, összesen ~750 mA; a korábbi 0,5 A nem elég).
 - 15 kapcsoló 5 × 3 rácsban: sorközéppont y = 80,5 / 104,5 / 128,5 (24 mm osztás), oszlopközéppont x = 27,5 + 33,75·j; idx = 3·oszlop + sor; a körök között ≥ 4 mm; benyúlás 5 mm.
 - Kötegsáv x 105–118,75: 15 SW12V (0,75–1,5 mm², a 12–14. vonal 2,5 mm²) + 1 db 0 V a LED-ekhez.
 - A 12 V sín csak a 12–14. vonalon (akku/töltő/PSU) kap betáplálást.

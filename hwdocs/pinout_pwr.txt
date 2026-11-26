@@ -5,7 +5,7 @@ Powerbox:
    - IN: 12V
    - OUT: FUSED12V[0..14]
  - SW [0..14]:
-   - 0: 0V (VIA Fuse 0 - LED 0V, 1 A)
+   - 0: 0V (VIA Fuse 0 - LED 0V, T 1 A)
    - "+": FUSED12V[0..14]
    - out: SW12V[0..14]
  - DCDC UC (ESP32 supply, 5 V output, ~5.2 V in practice):

@@ -1,11 +1,11 @@
 # Fizikai kialakítás (összevont, végleges állapot)
 
 Ez a dokumentum csak a jelenlegi állapotot tartalmazza (a draft 5–12 előzményei nélkül). Ábrák (azonos x/y tájolás, 4 mm/mm skálán, a mértékegység mm):
-- `lid_layout.svg`, `lid_wiring.svg`: fedél, elölnézet (elrendezés / vezetékezés)
-- `base_layout.svg`, `base_wiring.svg`: doboz alja, felülnézet fedél nélkül
-- `box_layout_A4.pdf`: ugyanezek A4-en, 1:1 méretarányban (4 oldal)
+- [`lid_layout.svg`](lid_layout.svg), [`lid_wiring.svg`](lid_wiring.svg): fedél, elölnézet (elrendezés / vezetékezés)
+- [`base_layout.svg`](base_layout.svg), [`base_wiring.svg`](base_wiring.svg): doboz alja, felülnézet fedél nélkül
+- [`box_layout_A4.pdf`](box_layout_A4.pdf): ugyanezek A4-en, 1:1 méretarányban (4 oldal)
 
-Az elektromos kapcsolatot a `pinout_pwr.txt` (teljesítmény), a `pinout_it.txt` (jelek, I2C, UART, DHT, PZEM) adja; a csatornánkénti shunt/fuse: `shunt_fuse.txt`, `SHUNT_CALC.md`.
+Az elektromos kapcsolatot a [`pinout_pwr.txt`](../pinout/pinout_pwr.txt) (teljesítmény), a [`pinout_it.txt`](../pinout/pinout_it.txt) (jelek, I2C, UART, DHT, PZEM) adja; a csatornánkénti shunt/fuse: [`shunt_fuse.txt`](../shunt_fuse.txt).
 
 ## Méretek
 Használható belső méret: 190 × 145 mm, 4 sarokban 13 × 13 mm csavarhely. Fedél ~20 mm, doboztest 50 mm mély.
@@ -50,7 +50,7 @@ Színek: kék = adat/jel (I2C_0, I2C_1, DHT), fekete = 0 V, narancs = terhelés 
 - PZEM-004T (AC mérő): külső modul, 4 pólusú csatlakozó (3V3, GND, UART_1_TX = GPIO2, UART_1_RX = GPIO3) + tömszelence. A modul hálózati oldala nem kerül a dobozba, csak az optocsatolós TTL oldal.
   - BAT42 modulonként a modul-oldali TX érintkezőn: katód (csík) a PZEM TX felé, anód a közös RX vonal felé.
   - 10 kΩ felhúzó a UART_1_RX vonalon a 3V3-ra (egyszer a vonalra), 330 Ω soros ellenállás az ESP GPIO3 előtt.
-  - Több PZEM modul ebben a dobozban nincs tervezve (lásd `config.h` megjegyzés).
+  - Több PZEM modul ebben a dobozban nincs tervezve (lásd a [`config.h`](../../src/config.h) megjegyzését).
 
 ## Külső rögzítés
 - Rögzítő téglalap 100 × 147 mm; a 147 a 200 mm-es oldal mentén.
@@ -61,8 +61,8 @@ Színek: kék = adat/jel (I2C_0, I2C_1, DHT), fekete = 0 V, narancs = terhelés 
 Doboztest elemei a fedélsík alatt: kék busbar 34 mm, sorkapocs 16, ESP 10, INA ~10 (távtartóval). A fedél alatt kilógók: piros busbar 14 mm, kapcsolók 5 mm; ütközés nincs.
 
 ## Állapot, nyitott pontok
-- Végleges: BTR 0 és CHARGER shunt (2 × 0,02 Ω, T-12,5A); sorkapocs 24 A.
+- Végleges: BTR 0 és CHARGER shunt (2 × 0,02 Ω, F-10A); sorkapocs 24 A.
 - Ideiglenes: BTR 1 shunt (1 × 0,02 Ω, T-5A).
-- Mérendő: az RPi tényleges terhelése (az INA1 ch2, 25 mΩ/T-2,5A felülvizsgálata), az RPi DC/DC hőterhelése próbaüzem után.
+- Mért: az RPi terhelése kb. 3 W (~0,7 A), a 25 mΩ-os shunt és a T-3,15A biztosíték megfelel, melegedés nem észlelhető.
 - Ellenőrizendő: a Supermini „5V" lábának és az USB tápjának összekötése (ha az USB és az „5V" láb dióda nélkül közös, USB-csatlakoztatáskor a soros 1N4001 a DC/DC felé védelmet ad; a Supermini kapcsolási rajza alapján megerősítendő).
 - A DC/DC-k lábkiosztása és tájolása feltételezett, a tényleges modul alapján pontosítandó.

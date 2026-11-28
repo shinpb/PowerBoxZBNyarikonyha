@@ -16,7 +16,7 @@ non-trivial Zigbee device built on ESP-IDF and the `esp-zigbee-lib` 2.x API, and
 ## What it measures
 
 - **15 DC channels** with 5 × INA3221 on two I²C buses (voltage, current, power per channel; the shunt of every
-  channel is set in `config.h`).
+  channel is set in [`config.h`](src/config.h)).
 - **AC mains** with a PZEM-004T v3 over UART (Modbus-RTU, 9600 8N1): voltage, current, active power, frequency,
   power factor, energy counter. The energy counter can be reset over Zigbee.
 - **2 × DHT22** (temperature, humidity) and the on-chip board temperature.
@@ -51,13 +51,13 @@ them with the converter's values (kept equal to the firmware defaults).
    pio device monitor        # 115200 baud
    ```
 
-The first build creates `sdkconfig.<env>` from `sdkconfig.defaults`. After editing `sdkconfig.defaults`, delete
+The first build creates `sdkconfig.<env>` from `sdkconfig.defaults`. After editing [`sdkconfig.defaults`](sdkconfig.defaults), delete
 the generated file to apply the change. The firmware version string is the short git hash (suffix `-d` if the
 working tree is dirty).
 
 ## Configuration
 
-Everything that is hardware- or deployment-specific is in one file, `src/config.h`: pins, I²C/UART buses, INA3221
+Everything that is hardware- or deployment-specific is in one file, [`src/config.h`](src/config.h): pins, I²C/UART buses, INA3221
 address layout and shunt values, measurement intervals, reporting defaults and per-channel thresholds, task stacks,
 log topics and the PZEM energy-reset mode.
 
@@ -71,7 +71,7 @@ PZEM energy reset (`Config.Sensor.Pzem.EnergyReset`):
 
 ## Pairing with Zigbee2MQTT
 
-1. Copy `powerbox_dc15_ac1_dht2.mjs` to `<zigbee2mqtt>/data/external_converters/` and restart Zigbee2MQTT.
+1. Copy [`powerbox_dc15_ac1_dht2.mjs`](powerbox_dc15_ac1_dht2.mjs) to `<zigbee2mqtt>/data/external_converters/` and restart Zigbee2MQTT.
 2. Enable *permit join*, power the device. It starts joining automatically when it is not part of a network.
 3. After the interview, run *Reconfigure* once if the reporting needs to be (re)written.
 4. To make the device forget the network, hold the **BOOT button (GPIO9) for 3 s**; it clears the Zigbee
@@ -90,19 +90,24 @@ the Raspberry Pi, a PZEM-004T for the mains input) is documented in [`hwdocs/`](
 
 | File | Content |
 |---|---|
-| `layout.md` | physical layout, dimensions, mechanical notes |
-| `pinout_pwr.txt`, `pinout_it.txt` | power wiring, signal wiring (I²C, UART, DHT, PZEM) |
-| `shunt_fuse.txt` | per-channel load, shunt and fuse table |
-| `lid_*.svg`, `base_*.svg`, `box_layout_A4.pdf` | layout and wiring drawings |
+| [`layout/layout.md`](hwdocs/layout/layout.md) | physical layout, dimensions, mechanical notes (Hungarian) |
+| [`pinout/pinout_pwr.txt`](hwdocs/pinout/pinout_pwr.txt), [`pinout/pinout_it.txt`](hwdocs/pinout/pinout_it.txt) | power wiring, signal wiring (I²C, UART, DHT, PZEM) |
+| [`shunt_fuse.txt`](hwdocs/shunt_fuse.txt) | per-channel load, shunt and fuse table |
+| [`layout/lid_layout.svg`](hwdocs/layout/lid_layout.svg), [`layout/lid_wiring.svg`](hwdocs/layout/lid_wiring.svg), [`layout/base_layout.svg`](hwdocs/layout/base_layout.svg), [`layout/base_wiring.svg`](hwdocs/layout/base_wiring.svg), [`layout/box_layout_A4.pdf`](hwdocs/layout/box_layout_A4.pdf) | layout and wiring drawings (lid, base; the PDF is the 1:1 A4 print) |
 
-The hardware drawings and notes describe one specific build; adapt the channel table and shunts in `config.h` to
+The hardware drawings and notes describe one specific build; adapt the channel table and shunts in [`config.h`](src/config.h) to
 yours.
 
-| Photos | |
-|---|---|
-| ![Inside of the box and the lid](hwdocs/photos/base_lid_internal.jpg) | Base (left) and lid (right) from inside: INA3221 modules, ESP32, busbars, terminal block, fuses and switches |
-| ![Lid, outside](hwdocs/photos/lid_external.jpg) | Lid from outside: 15 illuminated switches, fuse screws |
-| ![Base, outside](hwdocs/photos/base_external.jpg) | Base from outside |
+<p>
+  <a href="hwdocs/photos/base_lid_internal.jpg"><img src="hwdocs/photos/base_lid_internal.jpg" alt="Inside of the box: base (left) and lid (right)"></a><br>
+  <em>Base (left) and lid (right) from inside: INA3221 modules, ESP32, busbars, terminal block, fuses and switches.</em>
+</p>
+
+<p>
+  <a href="hwdocs/photos/lid_external.jpg"><img src="hwdocs/photos/lid_external.jpg" alt="Lid, outside" width="415"></a>
+  <a href="hwdocs/photos/base_external.jpg"><img src="hwdocs/photos/base_external.jpg" alt="Base, outside" width="415"></a><br>
+  <em>Lid from outside (15 illuminated switches, fuse screws) and base from outside. Click for the full size.</em>
+</p>
 
 > **Safety.** The PZEM-004T is connected to the mains. Only work on a mains-connected setup if you are qualified to,
 > keep the mains side isolated and enclosed, and never touch it while energized. The DC side is a low-voltage but

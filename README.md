@@ -93,6 +93,7 @@ the Raspberry Pi, a PZEM-004T for the mains input) is documented in [`hwdocs/`](
 | [`layout/layout.md`](hwdocs/layout/layout.md) | physical layout, dimensions, mechanical notes (Hungarian) |
 | [`pinout/pinout_pwr.txt`](hwdocs/pinout/pinout_pwr.txt), [`pinout/pinout_it.txt`](hwdocs/pinout/pinout_it.txt) | power wiring, signal wiring (I²C, UART, DHT, PZEM) |
 | [`shunt_fuse.txt`](hwdocs/shunt_fuse.txt) | per-channel load, shunt and fuse table |
+| [`BOM.md`](hwdocs/BOM.md) | bill of materials with part numbers, shop links and a total cost estimate (Hungarian shops, gross prices, HUF) |
 | [`layout/lid_layout.svg`](hwdocs/layout/lid_layout.svg), [`layout/lid_wiring.svg`](hwdocs/layout/lid_wiring.svg), [`layout/base_layout.svg`](hwdocs/layout/base_layout.svg), [`layout/base_wiring.svg`](hwdocs/layout/base_wiring.svg), [`layout/box_layout_A4.pdf`](hwdocs/layout/box_layout_A4.pdf) | layout and wiring drawings (lid, base; the PDF is the 1:1 A4 print) |
 
 The hardware drawings and notes describe one specific build; adapt the channel table and shunts in [`config.h`](src/config.h) to
